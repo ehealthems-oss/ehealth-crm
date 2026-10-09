@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const SERVICES = ["EMS", "Bota de Compressão", "Banheira de Gelo", "Raio-X do Jogo"];
+const EMS_FREQ = ["EMS 1x/semana", "EMS 2x/semana", "EMS 3x/semana"];
 const LOCATIONS = ["In Home", "Racquet Club Terral", "Racquet Club Salve Arena"];
 const STAGES = ["Lead", "Contato feito", "FUP", "Avaliação agendada", "Cliente ativo", "Inativo"];
 const COLORS = {
@@ -11,18 +11,14 @@ const COLORS = {
 };
 const gold="#c9a96e", navy="#0C1B33", cream="#F5F0E8";
 
-const LESSON_STATUS = ["Realizada","Reagendada","Cancelada pelo cliente","Cancelada pelo profissional"];
-const LESSON_STATUS_COLORS = {
-  "Realizada":"#2d7a4f","Reagendada":"#b05e1a",
-  "Cancelada pelo cliente":"#c0392b","Cancelada pelo profissional":"#888"
-};
+// 4 tipos fixos de avaliação
+const AVAL_TYPES = ["Postural","Funcional","Antropométrica","Integral"];
 
-const EMPTY_ANAMNESE = { objectives:"", injuries:"", medications:"", restrictions:"", history:"", observations:"" };
 const EMPTY_CLIENT = {
   name:"",phone:"",email:"",birthday:"",stage:"Lead",
-  location:"In Home",services:[],notes:"",
-  anamnese: EMPTY_ANAMNESE,
-  assessments:[], lessons:[], touchpoints:[], tasks:[],
+  location:"In Home",emsFreq:"EMS 2x/semana",professional:"",notes:"",
+  anamneseLink:"",anamneseDone:false,
+  assessments:[],lessons:[],touchpoints:[],tasks:[],
   avalDate:"", avalTime:""
 };
 
@@ -53,15 +49,6 @@ const nextBirthdayDays = bdStr => {
   if(next < now) next = new Date(yr+1, bd.getMonth(), bd.getDate());
   return Math.round((next-now)/(1000*60*60*24));
 };
-const nextAssessmentDate = (c) => {
-  if(!c.assessments?.length) return null;
-  const sorted = [...c.assessments].sort((a,b)=>a.date>b.date?-1:1);
-  const last = sorted[0];
-  if(!last?.date) return null;
-  const d = new Date(last.date+"T12:00:00");
-  d.setMonth(d.getMonth()+3);
-  return d.toISOString().split("T")[0];
-};
 const getAge = bdStr => {
   if(!bdStr) return null;
   const bd = new Date(bdStr+"T12:00:00");
@@ -72,7 +59,28 @@ const getAge = bdStr => {
   return age;
 };
 
-// ─── UI Components ────────────────────────────────────────────────────────────
+// Retorna a última data de cada tipo de avaliação e quantos dias até próxima (2 meses)
+const avalStatus = (c) => {
+  const assessments = c.assessments || [];
+  return AVAL_TYPES.map(type => {
+    const ofType = assessments.filter(a=>a.type===type).sort((a,b)=>b.date>a.date?1:-1);
+    const last = ofType[0];
+    if(!last) return { type, lastDate:null, nextDate:null, daysLeft:null };
+    const next = new Date(last.date+"T12:00:00");
+    next.setMonth(next.getMonth()+2);
+    const nextStr = next.toISOString().split("T")[0];
+    return { type, lastDate:last.date, nextDate:nextStr, daysLeft:daysUntil(nextStr) };
+  });
+};
+
+// Próxima avaliação pendente (menor daysLeft)
+const nextAvalAlert = (c) => {
+  const statuses = avalStatus(c).filter(s=>s.daysLeft!==null&&s.daysLeft<=14);
+  if(!statuses.length) return null;
+  return statuses.sort((a,b)=>a.daysLeft-b.daysLeft)[0];
+};
+
+// ─── UI Components ───────────────────────────────────────────────────────────
 function Badge({stage}){
   return <span style={{background:COLORS[stage]+"22",color:COLORS[stage],border:"1px solid "+COLORS[stage]+"55",borderRadius:20,padding:"2px 10px",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}>{stage}</span>;
 }
@@ -123,22 +131,6 @@ function TA({label,value,onChange,rows=3,placeholder=""}){
   );
 }
 
-function MC({label,options,selected,onChange}){
-  return(
-    <div style={{marginBottom:13}}>
-      {label&&<label style={{display:"block",fontSize:12,fontWeight:600,color:"#2a2218",marginBottom:6}}>{label}</label>}
-      <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-        {options.map(o=>(
-          <button key={o} onClick={()=>onChange(selected?.includes(o)?selected.filter(x=>x!==o):[...(selected||[]),o])}
-            style={{padding:"5px 12px",borderRadius:20,border:"1px solid",borderColor:(selected||[]).includes(o)?gold:"#c9b89a",background:(selected||[]).includes(o)?gold+"33":"#fffdf8",fontSize:13,cursor:"pointer",fontWeight:(selected||[]).includes(o)?700:400,color:(selected||[]).includes(o)?"#7a5c1e":"#2a2218"}}>
-            {o}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function Tabs({tabs,active,onChange}){
   return(
     <div style={{display:"flex",gap:0,borderBottom:"2px solid #e0d8cc",marginBottom:18,flexWrap:"wrap",overflowX:"auto"}}>
@@ -171,16 +163,7 @@ function AlertBadge({days,label}){
   );
 }
 
-function Btn({children,onClick,primary,danger,disabled,sm}){
-  return(
-    <button onClick={onClick} disabled={disabled}
-      style={{padding:sm?"5px 12px":"9px 18px",borderRadius:8,border:danger?"1px solid #fcc":"none",background:danger?"#fee":primary?navy:"#f0ebe0",color:danger?"#c0392b":primary?gold:"#2a2218",fontWeight:700,fontSize:sm?12:14,cursor:disabled?"default":"pointer",opacity:disabled?.5:1}}>
-      {children}
-    </button>
-  );
-}
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Main ────────────────────────────────────────────────────────────────────
 export default function CRM(){
   const [clients,setClients]=useState([]);
   const [search,setSearch]=useState("");
@@ -191,11 +174,16 @@ export default function CRM(){
   const [subModal,setSubModal]=useState(null);
   const [sel,setSel]=useState(null);
   const [detailTab,setDetailTab]=useState("geral");
-  const [form,setForm]=useState({...EMPTY_CLIENT,anamnese:{...EMPTY_ANAMNESE}});
-  const [assessForm,setAssessForm]=useState({date:today(),professional:"",type:"Reavaliação",notes:"",nextDate:""});
-  const [lessonForm,setLessonForm]=useState({date:today(),service:"EMS",professional:"",status:"Realizada",notes:""});
+  const [form,setForm]=useState({...EMPTY_CLIENT});
+  // Avaliação: um form por tipo
+  const [assessForm,setAssessForm]=useState({type:"Postural",date:today(),professional:"",notes:""});
+  // Aula
+  const [lessonForm,setLessonForm]=useState({date:today(),done:true,notes:""});
+  // Touchpoint
   const [touchForm,setTouchForm]=useState({date:today(),channel:"WhatsApp",direction:"Saída",summary:""});
+  // Tarefa
   const [taskForm,setTaskForm]=useState({title:"",dueDate:"",done:false});
+  // Funil agendamento
   const [pendingStage,setPendingStage]=useState(null);
   const [avalDate,setAvalDate]=useState("");
   const [avalTime,setAvalTime]=useState("");
@@ -210,12 +198,10 @@ export default function CRM(){
 
   const normalizeClient = c => ({
     ...EMPTY_CLIENT,...c,
-    anamnese:c.anamnese||{...EMPTY_ANAMNESE},
     assessments:c.assessments||[],
     lessons:c.lessons||[],
     touchpoints:c.touchpoints||[],
     tasks:c.tasks||[],
-    services:c.services||[],
   });
 
   // ── CRUD ──
@@ -258,16 +244,14 @@ export default function CRM(){
   };
 
   const ff = k => v => setForm(f=>({...f,[k]:v}));
-  const fa = k => v => setForm(f=>({...f,anamnese:{...f.anamnese,[k]:v}}));
 
+  // Contagem de aulas do mês atual
   const lessonStats = c => {
     const ls=(c.lessons||[]).filter(l=>isThisMonth(l.date));
     return {
       total:ls.length,
-      done:ls.filter(l=>l.status==="Realizada").length,
-      rescheduled:ls.filter(l=>l.status==="Reagendada").length,
-      canceledClient:ls.filter(l=>l.status==="Cancelada pelo cliente").length,
-      canceledPro:ls.filter(l=>l.status==="Cancelada pelo profissional").length,
+      done:ls.filter(l=>l.done).length,
+      notDone:ls.filter(l=>!l.done).length,
     };
   };
 
@@ -276,10 +260,11 @@ export default function CRM(){
     return(!q||c.name.toLowerCase().includes(q)||(c.phone||"").includes(q))&&(filterStage==="Todos"||c.stage===filterStage);
   });
 
+  // Alertas: aniversário ≤14d ou avaliação ≤14d
   const alerts=clients
     .filter(c=>c.stage==="Cliente ativo")
-    .map(c=>({ c, bd:nextBirthdayDays(c.birthday), avalDays:daysUntil(nextAssessmentDate(c)), nextAval:nextAssessmentDate(c) }))
-    .filter(x=>(x.bd!==null&&x.bd<=14)||(x.avalDays!==null&&x.avalDays<=14));
+    .map(c=>({ c, bd:nextBirthdayDays(c.birthday), avalAlert:nextAvalAlert(c) }))
+    .filter(x=>(x.bd!==null&&x.bd<=14)||(x.avalAlert!==null));
 
   const stats={
     total:clients.length,
@@ -314,7 +299,7 @@ export default function CRM(){
             </button>
           ))}
         </div>
-        <button onClick={()=>{setForm({...EMPTY_CLIENT,anamnese:{...EMPTY_ANAMNESE}});setModal("form");}}
+        <button onClick={()=>{setForm({...EMPTY_CLIENT});setModal("form");}}
           style={{background:gold,color:navy,border:"none",borderRadius:8,padding:"7px 16px",fontWeight:700,fontSize:13,cursor:"pointer"}}>
           + Nova Cliente
         </button>
@@ -335,13 +320,13 @@ export default function CRM(){
           {alerts.length>0&&(
             <div style={{background:"#fff",borderRadius:10,padding:16,marginBottom:14,boxShadow:"0 1px 4px #0001",borderTop:"3px solid #e74c3c"}}>
               <div style={{fontWeight:700,marginBottom:10,color:navy}}>🔔 Alertas</div>
-              {alerts.map(({c,bd,avalDays})=>(
+              {alerts.map(({c,bd,avalAlert})=>(
                 <div key={c.id} onClick={()=>{setSel(c);setDetailTab("geral");setModal("detail");}}
                   style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,background:"#f8f3ea",marginBottom:5,cursor:"pointer",border:"1px solid #e8dfc8"}}>
                   <span style={{flex:1,fontWeight:600,fontSize:13,color:navy}}>{c.name}</span>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                     {bd!==null&&bd<=14&&<AlertBadge days={bd} label="🎂"/>}
-                    {avalDays!==null&&avalDays<=14&&<AlertBadge days={avalDays} label="📋 Aval."/>}
+                    {avalAlert&&<AlertBadge days={avalAlert.daysLeft} label={`📋 ${avalAlert.type}`}/>}
                   </div>
                 </div>
               ))}
@@ -349,16 +334,15 @@ export default function CRM(){
           )}
 
           <div style={{background:"#fff",borderRadius:10,padding:16,marginBottom:14,boxShadow:"0 1px 4px #0001"}}>
-            <div style={{fontWeight:700,marginBottom:10,color:navy}}>📅 Aulas este mês</div>
+            <div style={{fontWeight:700,marginBottom:10,color:navy}}>💪 Aulas este mês</div>
             {clients.filter(c=>c.stage==="Cliente ativo"&&lessonStats(c).total>0).map(c=>{
               const s=lessonStats(c);
               return(
                 <div key={c.id} onClick={()=>{setSel(c);setDetailTab("aulas");setModal("detail");}}
                   style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderRadius:8,background:"#f8f3ea",marginBottom:4,cursor:"pointer"}}>
                   <span style={{flex:1,fontWeight:600,fontSize:13,color:navy}}>{c.name}</span>
-                  <span style={{fontSize:12,color:"#2d7a4f",fontWeight:600}}>✅ {s.done}</span>
-                  {s.rescheduled>0&&<span style={{fontSize:12,color:"#b05e1a",fontWeight:600}}>🔄 {s.rescheduled}</span>}
-                  {(s.canceledClient+s.canceledPro)>0&&<span style={{fontSize:12,color:"#c0392b",fontWeight:600}}>❌ {s.canceledClient+s.canceledPro}</span>}
+                  <span style={{fontSize:12,color:"#888"}}>{c.emsFreq}</span>
+                  <span style={{fontSize:12,color:"#2d7a4f",fontWeight:600}}>✅ {s.done}/{s.total}</span>
                 </div>
               );
             })}
@@ -398,17 +382,20 @@ export default function CRM(){
                   {cols.map(c=>{
                     const s=lessonStats(c);
                     const bd=nextBirthdayDays(c.birthday);
+                    const aa=nextAvalAlert(c);
                     return(
                       <div key={c.id} onClick={()=>{setSel(c);setDetailTab("geral");setModal("detail");}}
                         style={{background:"#fff",borderRadius:8,padding:"10px 12px",marginBottom:6,cursor:"pointer",border:"1px solid #e8dfc8",boxShadow:"0 1px 3px #0001"}}>
                         <div style={{fontWeight:600,fontSize:12,color:navy,marginBottom:2}}>{c.name}</div>
                         <div style={{fontSize:10,color:"#888"}}>{locLabel(c.location)}</div>
+                        {c.professional&&<div style={{fontSize:10,color:"#7a5c1e",fontWeight:600,marginTop:2}}>👤 {c.professional}</div>}
                         {c.stage==="Avaliação agendada"&&c.avalDate&&(
                           <div style={{fontSize:10,color:"#2a6b8a",fontWeight:600,marginTop:3}}>📅 {fmtDateShort(c.avalDate)}{c.avalTime?" "+c.avalTime:""}</div>
                         )}
                         <div style={{display:"flex",gap:5,marginTop:5,flexWrap:"wrap"}}>
-                          {s.total>0&&<span style={{fontSize:10,color:"#2d7a4f"}}>✅{s.done} {s.rescheduled>0&&`🔄${s.rescheduled}`} {(s.canceledClient+s.canceledPro)>0&&`❌${s.canceledClient+s.canceledPro}`}</span>}
+                          {s.total>0&&<span style={{fontSize:10,color:"#2d7a4f"}}>✅{s.done}/{s.total}</span>}
                           {bd!==null&&bd<=14&&<span style={{fontSize:10,color:"#e67e22",fontWeight:600}}>🎂{bd}d</span>}
+                          {aa&&<span style={{fontSize:10,color:"#c0392b",fontWeight:600}}>📋{aa.daysLeft}d</span>}
                         </div>
                       </div>
                     );
@@ -436,7 +423,7 @@ export default function CRM(){
             <div style={{textAlign:"center",padding:48,color:"#aaa"}}>
               <div style={{fontSize:40,marginBottom:12}}>👤</div>
               <div style={{marginBottom:14}}>Nenhuma cliente.</div>
-              <button onClick={()=>{setForm({...EMPTY_CLIENT,anamnese:{...EMPTY_ANAMNESE}});setModal("form");}}
+              <button onClick={()=>{setForm({...EMPTY_CLIENT});setModal("form");}}
                 style={{background:gold,color:navy,border:"none",borderRadius:8,padding:"8px 20px",fontWeight:700,cursor:"pointer"}}>
                 Adicionar primeira cliente
               </button>
@@ -444,7 +431,7 @@ export default function CRM(){
           ):filtered.map(c=>{
             const s=lessonStats(c);
             const bd=nextBirthdayDays(c.birthday);
-            const avalD=daysUntil(nextAssessmentDate(c));
+            const aa=nextAvalAlert(c);
             return(
               <div key={c.id} onClick={()=>{setSel(c);setDetailTab("geral");setModal("detail");}}
                 style={{background:"#fff",borderRadius:10,padding:"12px 16px",display:"flex",alignItems:"center",gap:12,boxShadow:"0 1px 4px #0001",border:"1px solid #e8dfc8",cursor:"pointer",marginBottom:7}}>
@@ -455,7 +442,8 @@ export default function CRM(){
                   <div style={{fontWeight:600,fontSize:14,color:navy}}>{c.name}</div>
                   <div style={{fontSize:11,color:"#888",marginTop:1}}>
                     {locLabel(c.location)}{c.phone?" · "+c.phone:""}
-                    {(c.services||[]).length?" · "+(c.services||[]).join(", "):""}
+                    {c.emsFreq?" · "+c.emsFreq:""}
+                    {c.professional?" · 👤 "+c.professional:""}
                   </div>
                   {c.stage==="Avaliação agendada"&&c.avalDate&&(
                     <div style={{fontSize:11,color:"#2a6b8a",fontWeight:600,marginTop:2}}>📅 {fmtDate(c.avalDate)}{c.avalTime?" às "+c.avalTime:""}</div>
@@ -463,9 +451,8 @@ export default function CRM(){
                 </div>
                 <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
                   {s.done>0&&<span style={{fontSize:11,color:"#2d7a4f",fontWeight:600}}>✅{s.done}</span>}
-                  {(s.canceledClient+s.canceledPro)>0&&<span style={{fontSize:11,color:"#c0392b",fontWeight:600}}>❌{s.canceledClient+s.canceledPro}</span>}
                   {bd!==null&&bd<=14&&<span style={{fontSize:11,color:"#e67e22",fontWeight:600}}>🎂{bd}d</span>}
-                  {avalD!==null&&avalD<=14&&<span style={{fontSize:11,color:"#c0392b",fontWeight:600}}>📋{avalD}d</span>}
+                  {aa&&<span style={{fontSize:11,color:"#c0392b",fontWeight:600}}>📋{aa.daysLeft}d</span>}
                   <Badge stage={c.stage}/>
                 </div>
               </div>
@@ -476,43 +463,40 @@ export default function CRM(){
 
       {/* ── MODAL FORM (novo/editar) ── */}
       {modal==="form"&&(
-        <Modal title={form.id?"Editar Cliente":"Nova Cliente"} onClose={()=>setModal(null)} wide>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-            {/* Coluna 1: dados */}
-            <div>
-              <div style={{fontWeight:700,fontSize:13,color:navy,marginBottom:10,paddingBottom:6,borderBottom:"1px solid #e0d8cc"}}>Dados pessoais</div>
-              <Inp label="Nome completo *" value={form.name} onChange={ff("name")}/>
-              <div style={{display:"flex",gap:10}}>
-                <Inp label="Telefone / WhatsApp" value={form.phone} onChange={ff("phone")} half/>
-                <Inp label="E-mail" value={form.email} onChange={ff("email")} type="email" half/>
-              </div>
-              <Inp label="Data de aniversário" value={form.birthday} onChange={ff("birthday")} type="date"/>
-              <Sel label="Status no funil" value={form.stage} onChange={ff("stage")} options={STAGES}/>
-              <div style={{marginBottom:13}}>
-                <label style={{display:"block",fontSize:12,fontWeight:600,marginBottom:6}}>Local</label>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  {LOCATIONS.map(loc=>(
-                    <button key={loc} onClick={()=>ff("location")(loc)}
-                      style={{flex:1,minWidth:80,padding:"7px 4px",borderRadius:8,border:"2px solid",borderColor:form.location===loc?gold:"#c9b89a",background:form.location===loc?gold+"22":"#fffdf8",fontWeight:form.location===loc?700:400,fontSize:11,cursor:"pointer",color:form.location===loc?"#7a5c1e":"#2a2218"}}>
-                      {locLabel(loc)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <MC label="Serviços" options={SERVICES} selected={form.services} onChange={ff("services")}/>
-              <TA label="Observações gerais" value={form.notes} onChange={ff("notes")} rows={2}/>
-            </div>
-            {/* Coluna 2: anamnese */}
-            <div>
-              <div style={{fontWeight:700,fontSize:13,color:navy,marginBottom:10,paddingBottom:6,borderBottom:"1px solid #e0d8cc"}}>Anamnese</div>
-              <TA label="Objetivos do cliente" value={form.anamnese.objectives} onChange={fa("objectives")} rows={2} placeholder="O que busca alcançar…"/>
-              <TA label="Lesões e histórico de dores" value={form.anamnese.injuries} onChange={fa("injuries")} rows={2} placeholder="Lesões anteriores, cirurgias…"/>
-              <TA label="Medicamentos em uso" value={form.anamnese.medications} onChange={fa("medications")} rows={2} placeholder="Medicamentos contínuos…"/>
-              <TA label="Restrições / contraindicações" value={form.anamnese.restrictions} onChange={fa("restrictions")} rows={2} placeholder="Restrições médicas…"/>
-              <TA label="Histórico de atividade física" value={form.anamnese.history} onChange={fa("history")} rows={2} placeholder="Prática anterior, frequência…"/>
-              <TA label="Observações do profissional" value={form.anamnese.observations} onChange={fa("observations")} rows={2} placeholder="Anotações livres…"/>
+        <Modal title={form.id?"Editar Cliente":"Nova Cliente"} onClose={()=>setModal(null)}>
+          <Inp label="Nome completo *" value={form.name} onChange={ff("name")}/>
+          <div style={{display:"flex",gap:10}}>
+            <Inp label="Telefone / WhatsApp" value={form.phone} onChange={ff("phone")} half/>
+            <Inp label="E-mail" value={form.email} onChange={ff("email")} type="email" half/>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <Inp label="Data de aniversário" value={form.birthday} onChange={ff("birthday")} type="date" half/>
+            <Inp label="Profissional responsável" value={form.professional} onChange={ff("professional")} placeholder="Ex: Wagner" half/>
+          </div>
+          <Sel label="Status no funil" value={form.stage} onChange={ff("stage")} options={STAGES}/>
+          <div style={{marginBottom:13}}>
+            <label style={{display:"block",fontSize:12,fontWeight:600,marginBottom:6}}>Local</label>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {LOCATIONS.map(loc=>(
+                <button key={loc} onClick={()=>ff("location")(loc)}
+                  style={{flex:1,minWidth:80,padding:"7px 4px",borderRadius:8,border:"2px solid",borderColor:form.location===loc?gold:"#c9b89a",background:form.location===loc?gold+"22":"#fffdf8",fontWeight:form.location===loc?700:400,fontSize:11,cursor:"pointer",color:form.location===loc?"#7a5c1e":"#2a2218"}}>
+                  {locLabel(loc)}
+                </button>
+              ))}
             </div>
           </div>
+          <div style={{marginBottom:13}}>
+            <label style={{display:"block",fontSize:12,fontWeight:600,marginBottom:6}}>Frequência EMS</label>
+            <div style={{display:"flex",gap:6}}>
+              {EMS_FREQ.map(f=>(
+                <button key={f} onClick={()=>ff("emsFreq")(f)}
+                  style={{flex:1,padding:"7px 4px",borderRadius:8,border:"2px solid",borderColor:form.emsFreq===f?gold:"#c9b89a",background:form.emsFreq===f?gold+"22":"#fffdf8",fontWeight:form.emsFreq===f?700:400,fontSize:11,cursor:"pointer",color:form.emsFreq===f?"#7a5c1e":"#2a2218"}}>
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+          <TA label="Observações gerais" value={form.notes} onChange={ff("notes")} rows={2}/>
           <div style={{display:"flex",gap:10,marginTop:10,justifyContent:"flex-end"}}>
             {form.id&&<button onClick={()=>del(form.id)} style={{background:"#fee",color:"#c0392b",border:"1px solid #fcc",borderRadius:8,padding:"9px 16px",cursor:"pointer",fontWeight:600}}>Excluir</button>}
             <button onClick={()=>setModal(null)} style={{background:"#f0ebe0",color:"#555",border:"none",borderRadius:8,padding:"9px 16px",cursor:"pointer",fontWeight:600}}>Cancelar</button>
@@ -520,19 +504,25 @@ export default function CRM(){
           </div>
         </Modal>
       )}
+
       {/* ── MODAL DETAIL ── */}
       {modal==="detail"&&sel&&(
         <Modal title={sel.name} onClose={()=>setModal(null)} wide>
           <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
             <Badge stage={sel.stage}/>
             <span style={{background:gold+"22",color:"#7a5c1e",border:"1px solid "+gold+"55",borderRadius:20,padding:"2px 10px",fontSize:12,fontWeight:600}}>{locLabel(sel.location)}</span>
-            {(sel.services||[]).map(s=><span key={s} style={{background:"#f0ebe0",borderRadius:20,padding:"2px 10px",fontSize:12,border:"1px solid #ddd"}}>{s}</span>)}
+            {sel.emsFreq&&<span style={{background:"#f0ebe0",borderRadius:20,padding:"2px 10px",fontSize:12,border:"1px solid #ddd"}}>{sel.emsFreq}</span>}
+            {sel.professional&&<span style={{background:"#eef4ff",borderRadius:20,padding:"2px 10px",fontSize:12,border:"1px solid #c0d0f0",color:navy}}>👤 {sel.professional}</span>}
             {nextBirthdayDays(sel.birthday)!==null&&nextBirthdayDays(sel.birthday)<=14&&<AlertBadge days={nextBirthdayDays(sel.birthday)} label="🎂"/>}
-            {nextAssessmentDate(sel)&&daysUntil(nextAssessmentDate(sel))<=14&&<AlertBadge days={daysUntil(nextAssessmentDate(sel))} label="📋 Avaliação"/>}
           </div>
 
+          {/* Alertas de avaliação */}
+          {avalStatus(sel).filter(s=>s.daysLeft!==null&&s.daysLeft<=14).map(s=>(
+            <AlertBadge key={s.type} days={s.daysLeft} label={`📋 ${s.type}`}/>
+          ))}
+
           {/* Funil rápido */}
-          <div style={{marginBottom:14,background:"#f8f3ea",borderRadius:8,padding:"10px 12px"}}>
+          <div style={{margin:"10px 0 14px",background:"#f8f3ea",borderRadius:8,padding:"10px 12px"}}>
             <div style={{fontSize:11,fontWeight:600,color:"#888",marginBottom:6}}>MOVER NO FUNIL</div>
             <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
               {STAGES.map(st=>(
@@ -547,7 +537,7 @@ export default function CRM(){
           <Tabs active={detailTab} onChange={setDetailTab} tabs={[
             {id:"geral",label:"Geral"},
             {id:"anamnese",label:"Anamnese"},
-            {id:"avaliacoes",label:`Avaliações (${(sel.assessments||[]).length})`},
+            {id:"avaliacoes",label:`Avaliações`},
             {id:"aulas",label:`Aulas`},
             {id:"touchpoints",label:`Contatos (${(sel.touchpoints||[]).length})`},
             {id:"tarefas",label:`Tarefas (${(sel.tasks||[]).filter(t=>!t.done).length})`},
@@ -573,88 +563,106 @@ export default function CRM(){
                     <span style={{fontWeight:600,color:"#2a6b8a"}}>{fmtDate(sel.avalDate)}{sel.avalTime?" às "+sel.avalTime:""}</span>
                   </div>
                 )}
-                {nextAssessmentDate(sel)&&(
-                  <div style={{gridColumn:"1/-1"}}>
-                    <span style={{color:"#888"}}>📋 Próxima avaliação: </span>
-                    <span style={{fontWeight:600,color:daysUntil(nextAssessmentDate(sel))<=7?"#c0392b":"#2a6b8a"}}>
-                      {fmtDate(nextAssessmentDate(sel))}
-                      {daysUntil(nextAssessmentDate(sel))<=14&&<span style={{fontWeight:600}}> ({daysUntil(nextAssessmentDate(sel))} dias)</span>}
-                    </span>
-                  </div>
-                )}
               </div>
               {sel.notes&&(
                 <div style={{background:"#f8f3ea",borderRadius:8,padding:"10px 12px",fontSize:13,color:"#555",marginBottom:12}}>
                   {sel.notes}
                 </div>
               )}
+              {/* Resumo aulas mês */}
               {(()=>{const s=lessonStats(sel);if(!s.total)return null;return(
                 <div style={{background:"#f0f9f0",borderRadius:8,padding:"10px 14px",fontSize:13,marginBottom:12,display:"flex",gap:16,flexWrap:"wrap",border:"1px solid #c0e4c0"}}>
                   <span style={{fontWeight:700,color:navy}}>Aulas este mês:</span>
-                  <span style={{color:"#2d7a4f",fontWeight:600}}>✅ {s.done} realizadas</span>
-                  {s.rescheduled>0&&<span style={{color:"#b05e1a",fontWeight:600}}>🔄 {s.rescheduled} reagendadas</span>}
-                  {(s.canceledClient+s.canceledPro)>0&&<span style={{color:"#c0392b",fontWeight:600}}>❌ {s.canceledClient+s.canceledPro} canceladas</span>}
+                  <span style={{color:"#2d7a4f",fontWeight:600}}>✅ {s.done}/{s.total} realizadas</span>
                 </div>
               );})()}
-              <div style={{display:"flex",gap:10}}>
-                <button onClick={()=>{setForm({...sel,anamnese:sel.anamnese||{...EMPTY_ANAMNESE}});setModal("form");}}
-                  style={{flex:1,background:navy,color:gold,border:"none",borderRadius:8,padding:"9px 0",fontWeight:700,cursor:"pointer"}}>
-                  Editar cliente
-                </button>
-              </div>
+              <button onClick={()=>{setForm({...sel});setModal("form");}}
+                style={{width:"100%",background:navy,color:gold,border:"none",borderRadius:8,padding:"9px 0",fontWeight:700,cursor:"pointer"}}>
+                Editar cliente
+              </button>
             </div>
           )}
 
           {/* TAB ANAMNESE */}
           {detailTab==="anamnese"&&(
             <div>
-              {[
-                ["🎯 Objetivos",sel.anamnese?.objectives],
-                ["🤕 Lesões e dores",sel.anamnese?.injuries],
-                ["💊 Medicamentos",sel.anamnese?.medications],
-                ["⚠️ Restrições",sel.anamnese?.restrictions],
-                ["🏃 Histórico de atividade",sel.anamnese?.history],
-                ["📝 Observações do profissional",sel.anamnese?.observations],
-              ].map(([label,val])=>(
-                <div key={label} style={{marginBottom:14}}>
-                  <div style={{fontSize:11,fontWeight:700,color:"#888",textTransform:"uppercase",marginBottom:4}}>{label}</div>
-                  <div style={{background:val?"#f8f3ea":"#f5f0e8",borderRadius:8,padding:"10px 12px",fontSize:13,color:val?"#2a2218":"#bbb",minHeight:36,fontStyle:val?"normal":"italic"}}>
-                    {val||"Não informado"}
+              <div style={{background:"#f8f3ea",borderRadius:10,padding:"16px",marginBottom:16,border:"1px solid #e8dfc8"}}>
+                <div style={{fontWeight:700,color:navy,marginBottom:8,fontSize:13}}>📋 Ficha de Anamnese</div>
+                <p style={{fontSize:13,color:"#555",marginBottom:12,lineHeight:1.5}}>
+                  A anamnese é preenchida em formulário externo. Registre aqui se ela já foi realizada e cole o link de acesso.
+                </p>
+                <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+                  <button onClick={()=>updateSel(c=>({...c,anamneseDone:!c.anamneseDone}))}
+                    style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px",borderRadius:8,border:"2px solid",borderColor:sel.anamneseDone?"#2d7a4f":"#c9b89a",background:sel.anamneseDone?"#e8f8ee":"#fffdf8",cursor:"pointer",fontWeight:700,fontSize:13,color:sel.anamneseDone?"#2d7a4f":"#888"}}>
+                    {sel.anamneseDone?"✅ Anamnese realizada":"▫️ Anamnese pendente"}
+                  </button>
+                </div>
+                <div style={{marginBottom:8}}>
+                  <label style={{display:"block",fontSize:12,fontWeight:600,color:"#2a2218",marginBottom:4}}>Link da ficha de anamnese</label>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <input value={sel.anamneseLink||""} onChange={e=>updateSel(c=>({...c,anamneseLink:e.target.value}))}
+                      placeholder="Cole aqui o link do formulário…"
+                      style={{flex:1,padding:"8px 12px",border:"1px solid #c9b89a",borderRadius:8,fontSize:13,background:"#fffdf8",color:"#2a2218",outline:"none"}}/>
+                    {sel.anamneseLink&&(
+                      <a href={sel.anamneseLink} target="_blank" rel="noopener"
+                        style={{padding:"8px 14px",background:navy,color:gold,borderRadius:8,fontSize:12,fontWeight:700,textDecoration:"none",whiteSpace:"nowrap"}}>
+                        Abrir ↗
+                      </a>
+                    )}
                   </div>
                 </div>
-              ))}
-              <button onClick={()=>{setForm({...sel,anamnese:sel.anamnese||{...EMPTY_ANAMNESE}});setModal("form");}}
-                style={{width:"100%",background:navy,color:gold,border:"none",borderRadius:8,padding:"9px 0",fontWeight:700,cursor:"pointer",marginTop:4}}>
-                Editar anamnese
-              </button>
+              </div>
             </div>
           )}
 
           {/* TAB AVALIAÇÕES */}
           {detailTab==="avaliacoes"&&(
             <div>
-              <SectionTitle action={
-                <button onClick={()=>{setAssessForm({date:today(),professional:"",type:"Reavaliação",notes:"",nextDate:""});setSubModal("assessment");}}
-                  style={{background:gold,color:navy,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                  + Registrar avaliação
-                </button>
-              }>Histórico de avaliações</SectionTitle>
-              {nextAssessmentDate(sel)&&(
-                <div style={{background:"#eef6fb",borderRadius:8,padding:"8px 12px",fontSize:12,marginBottom:12,color:"#2a6b8a",fontWeight:600,border:"1px solid #c0dff0"}}>
-                  📋 Próxima avaliação sugerida: {fmtDate(nextAssessmentDate(sel))}
-                  {daysUntil(nextAssessmentDate(sel))<=14&&<span style={{color:"#c0392b"}}> — em {daysUntil(nextAssessmentDate(sel))} dias</span>}
-                </div>
-              )}
+              {/* Cards dos 4 tipos */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:16}}>
+                {avalStatus(sel).map(({type,lastDate,nextDate,daysLeft})=>{
+                  const hasAval = !!lastDate;
+                  const urgent = daysLeft!==null && daysLeft<=7;
+                  const warn = daysLeft!==null && daysLeft<=14;
+                  const overdue = daysLeft!==null && daysLeft<0;
+                  return(
+                    <div key={type} style={{background:overdue?"#fff0ee":urgent?"#fff8ee":warn?"#fffde8":"#f8f3ea",borderRadius:10,padding:"12px 14px",border:`1px solid ${overdue?"#f0a0a0":urgent?"#f0c080":warn?"#e8d860":"#e0d8cc"}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                        <span style={{fontWeight:700,fontSize:13,color:navy}}>{type}</span>
+                        <button onClick={()=>{setAssessForm({type,date:today(),professional:sel.professional||"",notes:""});setSubModal("assessment");}}
+                          style={{background:gold,color:navy,border:"none",borderRadius:6,padding:"3px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                          + Registrar
+                        </button>
+                      </div>
+                      {hasAval?(
+                        <>
+                          <div style={{fontSize:12,color:"#555"}}>Última: <b>{fmtDate(lastDate)}</b></div>
+                          <div style={{fontSize:12,marginTop:3,color:overdue?"#c0392b":urgent?"#b05e1a":warn?"#7a6000":"#2d7a4f",fontWeight:600}}>
+                            {overdue?`⚠️ Vencida há ${Math.abs(daysLeft)}d`:
+                             urgent?`🔶 Vence em ${daysLeft}d`:
+                             warn?`📅 Vence em ${daysLeft}d`:
+                             `✅ Próxima: ${fmtDate(nextDate)}`}
+                          </div>
+                        </>
+                      ):(
+                        <div style={{fontSize:12,color:"#aaa",fontStyle:"italic"}}>Ainda não realizada</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Histórico */}
+              <SectionTitle>Histórico de avaliações</SectionTitle>
               {(sel.assessments||[]).length===0?(
-                <div style={{fontSize:13,color:"#aaa",textAlign:"center",padding:"20px 0"}}>Nenhuma avaliação registrada.</div>
-              ):[...(sel.assessments||[])].sort((a,b)=>a.date>b.date?-1:1).map(a=>(
+                <div style={{fontSize:13,color:"#aaa",textAlign:"center",padding:"16px 0"}}>Nenhuma avaliação registrada.</div>
+              ):[...(sel.assessments||[])].sort((a,b)=>b.date>a.date?1:-1).map(a=>(
                 <div key={a.id} style={{background:"#f8f3ea",borderRadius:8,padding:"10px 14px",fontSize:13,marginBottom:8,border:"1px solid #e8dfc8"}}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,alignItems:"center"}}>
                     <span style={{fontWeight:700,color:navy}}>{a.type}</span>
                     <span style={{color:"#888",fontSize:12}}>{fmtDate(a.date)}</span>
                   </div>
                   {a.professional&&<div style={{color:"#888",fontSize:12,marginBottom:2}}>👤 {a.professional}</div>}
-                  {a.nextDate&&<div style={{color:"#2a6b8a",fontSize:12,marginBottom:2}}>📅 Próxima: {fmtDate(a.nextDate)}</div>}
                   {a.notes&&<div style={{color:"#555",marginTop:6,fontSize:13,borderTop:"1px solid #e0d8cc",paddingTop:6}}>{a.notes}</div>}
                 </div>
               ))}
@@ -664,42 +672,39 @@ export default function CRM(){
           {/* TAB AULAS */}
           {detailTab==="aulas"&&(
             <div>
+              {/* Contador do mês */}
               {(()=>{const s=lessonStats(sel);return(
-                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
-                  {[{l:"Realizadas",v:s.done,c:"#2d7a4f"},{l:"Reagendadas",v:s.rescheduled,c:"#b05e1a"},{l:"Cancel. cliente",v:s.canceledClient,c:"#c0392b"},{l:"Cancel. prof.",v:s.canceledPro,c:"#888"}].map(x=>(
-                    <div key={x.l} style={{background:x.c+"12",borderRadius:8,padding:"8px 10px",textAlign:"center",border:"1px solid "+x.c+"30"}}>
-                      <div style={{fontSize:22,fontWeight:700,color:x.c}}>{x.v}</div>
-                      <div style={{fontSize:10,color:"#888",marginTop:2}}>{x.l}</div>
-                    </div>
-                  ))}
+                <div style={{display:"flex",gap:10,marginBottom:16}}>
+                  <div style={{flex:1,background:"#e8f8ee",borderRadius:10,padding:"12px",textAlign:"center",border:"1px solid #b0ddc0"}}>
+                    <div style={{fontSize:28,fontWeight:700,color:"#2d7a4f"}}>{s.done}</div>
+                    <div style={{fontSize:11,color:"#888"}}>Realizadas este mês</div>
+                  </div>
+                  <div style={{flex:1,background:"#f8f3ea",borderRadius:10,padding:"12px",textAlign:"center",border:"1px solid #e0d8cc"}}>
+                    <div style={{fontSize:28,fontWeight:700,color:navy}}>{s.total}</div>
+                    <div style={{fontSize:11,color:"#888"}}>Total registradas</div>
+                  </div>
                 </div>
               );})()}
               <SectionTitle action={
-                <button onClick={()=>{setLessonForm({date:today(),service:(sel.services||[])[0]||SERVICES[0],professional:"",status:"Realizada",notes:""});setSubModal("lesson");}}
+                <button onClick={()=>{setLessonForm({date:today(),done:true,notes:""});setSubModal("lesson");}}
                   style={{background:gold,color:navy,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                   + Registrar aula
                 </button>
               }>Histórico de aulas</SectionTitle>
               {(sel.lessons||[]).length===0?(
                 <div style={{fontSize:13,color:"#aaa",textAlign:"center",padding:"20px 0"}}>Nenhuma aula registrada.</div>
-              ):[...(sel.lessons||[])].sort((a,b)=>a.date>b.date?-1:1).map(l=>{
-                const sc=LESSON_STATUS_COLORS[l.status]||"#888";
-                return(
-                  <div key={l.id} style={{background:"#fff",borderRadius:8,padding:"10px 14px",fontSize:13,marginBottom:7,border:"1px solid #e8dfc8"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:l.notes?6:0}}>
-                      <div>
-                        <span style={{fontWeight:600,color:navy}}>{l.service}</span>
-                        {l.professional&&<span style={{color:"#888",fontSize:12}}> · {l.professional}</span>}
-                      </div>
-                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                        <span style={{background:sc+"15",color:sc,border:"1px solid "+sc+"30",borderRadius:20,padding:"1px 8px",fontSize:11,fontWeight:600}}>{l.status}</span>
-                        <span style={{color:"#aaa",fontSize:12}}>{fmtDateShort(l.date)}</span>
-                      </div>
+              ):[...(sel.lessons||[])].sort((a,b)=>b.date>a.date?1:-1).map(l=>(
+                <div key={l.id} style={{background:"#fff",borderRadius:8,padding:"10px 14px",fontSize:13,marginBottom:7,border:"1px solid #e8dfc8"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:l.notes?6:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:18}}>{l.done?"✅":"⬜"}</span>
+                      <span style={{fontWeight:600,color:navy,fontSize:13}}>{fmtDate(l.date)}</span>
                     </div>
-                    {l.notes&&<div style={{color:"#555",fontSize:12,background:"#f8f3ea",borderRadius:6,padding:"6px 8px",borderLeft:"3px solid "+sc}}>{l.notes}</div>}
+                    <span style={{color:"#aaa",fontSize:12}}>{sel.emsFreq}</span>
                   </div>
-                );
-              })}
+                  {l.notes&&<div style={{color:"#555",fontSize:12,background:"#f8f3ea",borderRadius:6,padding:"6px 8px",borderLeft:"3px solid "+gold,marginTop:4}}>{l.notes}</div>}
+                </div>
+              ))}
             </div>
           )}
 
@@ -714,7 +719,7 @@ export default function CRM(){
               }>Touch points</SectionTitle>
               {(sel.touchpoints||[]).length===0?(
                 <div style={{fontSize:13,color:"#aaa",textAlign:"center",padding:"20px 0"}}>Nenhum contato registrado.</div>
-              ):[...(sel.touchpoints||[])].sort((a,b)=>a.date>b.date?-1:1).map(tp=>(
+              ):[...(sel.touchpoints||[])].sort((a,b)=>b.date>a.date?1:-1).map(tp=>(
                 <div key={tp.id} style={{display:"flex",gap:10,padding:"9px 12px",background:"#fff",borderRadius:8,border:"1px solid #e8dfc8",marginBottom:6}}>
                   <div style={{width:34,height:34,borderRadius:"50%",background:tp.direction==="Saída"?navy+"15":gold+"25",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
                     {tp.channel==="WhatsApp"?"💬":tp.channel==="Ligação"?"📞":"🤝"}
@@ -779,7 +784,7 @@ export default function CRM(){
       {/* ── SUB-MODAL: Avaliação agendada ── */}
       {pendingStage&&(
         <Modal title="📅 Agendar avaliação" onClose={()=>setPendingStage(null)}>
-          <p style={{fontSize:13,color:"#555",marginBottom:16}}>Informe a data e horário agendados para a avaliação.</p>
+          <p style={{fontSize:13,color:"#555",marginBottom:16}}>Informe a data e horário agendados.</p>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
             <Inp label="Data" value={avalDate} onChange={setAvalDate} type="date"/>
             <Inp label="Horário" value={avalTime} onChange={setAvalTime} type="time"/>
@@ -791,16 +796,12 @@ export default function CRM(){
         </Modal>
       )}
 
-      {/* ── SUB-MODAL: Avaliação ── */}
+      {/* ── SUB-MODAL: Registrar avaliação ── */}
       {subModal==="assessment"&&(
-        <Modal title="📋 Registrar avaliação" onClose={()=>setSubModal(null)}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <Inp label="Data" value={assessForm.date} onChange={v=>setAssessForm(f=>({...f,date:v}))} type="date"/>
-            <Sel label="Tipo" value={assessForm.type} onChange={v=>setAssessForm(f=>({...f,type:v}))} options={["Inicial","Reavaliação","Funcional","Postural","Específica"]}/>
-          </div>
-          <Inp label="Profissional responsável" value={assessForm.professional} onChange={v=>setAssessForm(f=>({...f,professional:v}))} placeholder="Nome do profissional"/>
-          <Inp label="Data sugerida para próxima avaliação" value={assessForm.nextDate} onChange={v=>setAssessForm(f=>({...f,nextDate:v}))} type="date"/>
-          <TA label="Resultados e observações" value={assessForm.notes} onChange={v=>setAssessForm(f=>({...f,notes:v}))} rows={5} placeholder="Resultados, medidas, progressos, observações…"/>
+        <Modal title={`📋 Registrar avaliação — ${assessForm.type}`} onClose={()=>setSubModal(null)}>
+          <Inp label="Data da avaliação" value={assessForm.date} onChange={v=>setAssessForm(f=>({...f,date:v}))} type="date"/>
+          <Inp label="Profissional" value={assessForm.professional} onChange={v=>setAssessForm(f=>({...f,professional:v}))} placeholder="Nome do profissional"/>
+          <TA label="Observações / resultados" value={assessForm.notes} onChange={v=>setAssessForm(f=>({...f,notes:v}))} rows={4} placeholder="Resultados, medidas, progressos…"/>
           <button onClick={async()=>{
             await updateSel(c=>({...c,assessments:[{...assessForm,id:Date.now().toString()},...(c.assessments||[])]}));
             setSubModal(null);
@@ -810,16 +811,24 @@ export default function CRM(){
         </Modal>
       )}
 
-      {/* ── SUB-MODAL: Aula ── */}
+      {/* ── SUB-MODAL: Registrar aula ── */}
       {subModal==="lesson"&&(
         <Modal title="💪 Registrar aula" onClose={()=>setSubModal(null)}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <Inp label="Data" value={lessonForm.date} onChange={v=>setLessonForm(f=>({...f,date:v}))} type="date"/>
-            <Sel label="Serviço" value={lessonForm.service} onChange={v=>setLessonForm(f=>({...f,service:v}))} options={(sel.services||[]).length>0?sel.services:SERVICES}/>
+          <Inp label="Data da aula" value={lessonForm.date} onChange={v=>setLessonForm(f=>({...f,date:v}))} type="date"/>
+          <div style={{marginBottom:13}}>
+            <label style={{display:"block",fontSize:12,fontWeight:600,color:"#2a2218",marginBottom:8}}>A aula foi realizada?</label>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setLessonForm(f=>({...f,done:true}))}
+                style={{flex:1,padding:"10px",borderRadius:8,border:"2px solid",borderColor:lessonForm.done?"#2d7a4f":"#c9b89a",background:lessonForm.done?"#e8f8ee":"#fffdf8",fontWeight:700,fontSize:14,cursor:"pointer",color:lessonForm.done?"#2d7a4f":"#888"}}>
+                ✅ Sim, realizada
+              </button>
+              <button onClick={()=>setLessonForm(f=>({...f,done:false}))}
+                style={{flex:1,padding:"10px",borderRadius:8,border:"2px solid",borderColor:!lessonForm.done?"#c0392b":"#c9b89a",background:!lessonForm.done?"#ffeaea":"#fffdf8",fontWeight:700,fontSize:14,cursor:"pointer",color:!lessonForm.done?"#c0392b":"#888"}}>
+                ❌ Não realizada
+              </button>
+            </div>
           </div>
-          <Inp label="Profissional" value={lessonForm.professional} onChange={v=>setLessonForm(f=>({...f,professional:v}))} placeholder="Nome do profissional"/>
-          <Sel label="Status da aula" value={lessonForm.status} onChange={v=>setLessonForm(f=>({...f,status:v}))} options={LESSON_STATUS}/>
-          <TA label="Comentários do profissional" value={lessonForm.notes} onChange={v=>setLessonForm(f=>({...f,notes:v}))} rows={4} placeholder="Como foi a aula, evolução observada, pontos de atenção, ajustes para próxima sessão…"/>
+          <TA label="Observação do profissional" value={lessonForm.notes} onChange={v=>setLessonForm(f=>({...f,notes:v}))} rows={4} placeholder="Como foi a aula, evolução, pontos de atenção, ajustes para próxima sessão…"/>
           <button onClick={async()=>{
             await updateSel(c=>({...c,lessons:[{...lessonForm,id:Date.now().toString()},...(c.lessons||[])]}));
             setSubModal(null);
