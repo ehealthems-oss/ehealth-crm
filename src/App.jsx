@@ -495,7 +495,7 @@ export default function CRM() {
 
   // ── RENDER ──
   return (
-    <div style={{ fontFamily: "'Segoe UI',system-ui,sans-serif", background: cream, minHeight: "100vh", color: "#2a2218" }}>
+    <div style={{ fontFamily: "'Segoe UI'lsystem-ui,sans-serif", background: cream, minHeight: "100vh", color: "#2a2218" }}>
 
       {/* Header */}
       <div style={{ background: navy, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, position: "sticky", top: 0, zIndex: 50 }}>
@@ -646,7 +646,7 @@ export default function CRM() {
                   <Badge stage={c.stage} />
                 </div>
               </div>
-             );
+            );
           })}
         </div>
       )}
@@ -822,7 +822,7 @@ export default function CRM() {
                 ) : (
                   <button onClick={() => fileInputRef.current?.click()} disabled={aiLoading}
                     style={{ width: "100%", padding: "14px", border: "2px dashed #c9b89a", borderRadius: 8, background: "#fffdf8", cursor: "pointer", color: "#888", fontSize: 13 }}>
-                    {aiLoading ? "⏳ Enviando…" : "📎 Clique para fazer upload do PDF"}
+                    {aiLoading ? "⏳ Enviando‖" : "📎 Clique para fazer upload do PDF"}
                   </button>
                 )}
                 <input ref={fileInputRef} type="file" accept=".pdf" style={{ display: "none" }}
@@ -845,6 +845,41 @@ export default function CRM() {
                   {sel.anamneseLink && (
                     <a href={sel.anamneseLink} target="_blank" rel="noopener"
                       style={{ padding: "8px 14px", background: navy, color: gold, borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap" }}>
+                      Abrir ↗
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB AVALIAÇÕES */}
+          {detailTab === "avaliacoes" && (
+            <div>
+              <SectionTitle action={
+                <button onClick={() => setSubModal("assess")} style={{ background: navy, color: gold, border: "none", borderRadius: 6, padding: "4px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ Nova</button>
+              }>Avaliações</SectionTitle>
+              {avalStatus(sel).map(s => (
+                <div key={s.type} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 8, background: "#f8f3ea", marginBottom: 6, border: "1px solid #e4daca" }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: navy, flex: 1 }}>{s.type}</span>
+                  <span style={{ fontSize: 12, color: "#888" }}>{sortedDate(s.lastDate)}</span>
+                  {s.daysLeft !== null && <AlertBadge days={s.daysLeft} label={`Próxima ${s.type}`} />}
+                </div>
+              ))}
+              {(sel.assessments || []).length === 0 && <div style={{ fontSize: 13, color: "#aaa", padding: "12px 0" }}>Nenhuma avaliação registrada.</div>}
+              {sel.assessments.map((a, i) => (
+                <div key={i} style={{ background: "#f8f3ea", borderRadius: 8, padding: "12px 14px", marginBottom: 8, border: "1px solid #e4daca" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: navy }}>{a.type}</span>
+                    <span style={{ fontSize: 12, color: "#888" }}>{sortedDate(a.date)}</span>
+                  </div>
+                  {(a.professional || a.notes) && <div style={{ fontSize: 12, color: "#555" }}>{a.professional ? `👤 Avaliador: ${a.professional}` : ""}{a.notes ? (a.professional ? " • " : "") + a.notes : ""}</div>}
+                  <button onClick={() => updateSel(c => ({ ...c, assessments: c.assessments.filter((_, j) => j !== i) }))}
+                    style={{ marginTop: 8, background: "none", border: "none", color: "#c0392b", fontSize: 12, cursor: "pointer" }}>Remover</button>
+                </div>
+              ))}
+            </div>
+          )}, textDecoration: "none", whiteSpace: "nowrap" }}>
                       Abrir ↗
                     </a>
                   )}
@@ -968,7 +1003,7 @@ export default function CRM() {
                         <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 12, color: "#555" }}>
                           {l.dormiu && <div>😴 Dormiu bem: <b>{l.dormiu}</b></div>}
                           {l.descansado && <div>⚡ Descansado: <b>{l.descansado}</b></div>}
-                                  {l.dor !== null && l.dor !== undefined && <div>🤕 Dor/desconforto: <b>{l.dor}/10</b></div>}
+                          {l.dor !== null && l.dor !== undefined && <div>🤕 Dor/desconforto: <b>{l.dor}/10</b></div>}
                           {l.alimentacao && <div style={{ gridColumn: "1/-1" }}>🍎 Alimentação: {l.alimentacao}</div>}
                           {l.musculosTrabalhados && <div style={{ gridColumn: "1/-1" }}>💪 Músculos: {l.musculosTrabalhados}</div>}
                           {l.adaptacoes && <div style={{ gridColumn: "1/-1" }}>🔧 Adaptações: {l.adaptacoes}</div>}
@@ -992,7 +1027,50 @@ export default function CRM() {
                   + Registrar contato
                 </button>
               }>Touch points</SectionTitle>
-              {sel.touchpoints || []).length === 0 ? (
+              {(sel.touchpoints || []).length === 0 ? (
+                <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "20px 0" }}>Nenhum contato registrado.</div>
+              ) : [...(sel.touchpoints || [])].sort((a, b) => b.date > a.date ? 1 : -1).map(tp => (
+                <div key={tp.id} style={{ display: "flex", gap: 10, padding: "9px 12px", background: "#fff", borderRadius: 8, border: "1px solid #e8dfc8", marginBottom: 6 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: tp.direction === "Saída" ? navy + "15" : gold + "25", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
+                    {tp.channel === "WhatsApp" ? "💬" : tp.channel === "Ligação" ? "📞" : "🤝"}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                      <span style={{ fontWeight: 600, fontSize: 12, color: navy }}>{tp.channel} · {tp.direction}</span>
+                      <span style={{ fontSize: 11, color: "#aaa" }}>{fmtDateShort(tp.date)}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#555" }}>{tp.summary}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* TAB TAREF         {l.dor !== null && l.dor !== undefined && <div>🤕 Dor/desconforto: <b>{l.dor}/10</b></div>}
+                          {l.alimentacao && <div style={{ gridColumn: "1/-1" }}>🍎 Alimentação: {l.alimentacao}</div>}
+                          {l.musculosTrabalhados && <div style={{ gridColumn: "1/-1" }}>💪 Músculos: {l.musculosTrabalhados}</div>}
+                          {l.adaptacoes && <div style={{ gridColumn: "1/-1" }}>🔧 Adaptações: {l.adaptacoes}</div>}
+                          {l.riscoRetencao && <div style={{ gridColumn: "1/-1", color: "#c0392b", fontWeight: 600 }}>⚠️ Risco: {l.riscoRetencao}</div>}
+                          {l.observacaoGeral && <div style={{ gridColumn: "1/-1", marginTop: 4, padding: "6px 8px", background: "#f8f3ea", borderRadius: 6 }}>📝 {l.observacaoGeral}</div>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* TAB TOUCHPOINTS */}
+          {detailTab === "touchpoints" && (
+            <div>
+              <SectionTitle action={
+                <button onClick={() => { setTouchForm({ date: today(), channel: "WhatsApp", direction: "Saída", summary: "" }); setSubModal("touch"); }}
+                  style={{ background: gold, color: navy, border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  + Registrar contato
+                </button>
+              }>Touch points</SectionTitle>
+              {(sel.touchpoints || []).length === 0 ? (
                 <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "20px 0" }}>Nenhum contato registrado.</div>
               ) : [...(sel.touchpoints || [])].sort((a, b) => b.date > a.date ? 1 : -1).map(tp => (
                 <div key={tp.id} style={{ display: "flex", gap: 10, padding: "9px 12px", background: "#fff", borderRadius: 8, border: "1px solid #e8dfc8", marginBottom: 6 }}>
@@ -1012,55 +1090,6 @@ export default function CRM() {
           )}
 
           {/* TAB TAREFAS */}
-          {detailTab === "tarefas" && (
-            <div>
-              <SectionTitle action={
-                <button onClick={() => { setTaskForm({ text: "", due: "" }); setSubModal("task"); }}
-                  style={{ background: gold, color: navy, border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                  + Add tarefa
-                </button>
-              }>Tarefas pendentes</SectionTitle>
-
-              {sel.tasks && sel.tasks.filter(t => !t.done).map(t => (
-                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: "#fff", borderRadius: 8, border: "1px solid #e8dfc8", marginBottom: 6 }}>
-                  <button onClick={() => toggleTask(t.id)}
-                    style={{ width: 22, height: 22, borderRadius: "50%", border: "2px solid " + gold, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, color: navy }}>{t.text}</div>
-                    {t.due && <div style={{ fontSize: 11, color: "#aaa" }}>Prazo: {fmtDate(t.due)}</div>}
-                  </div>
-                </div>
-              ))}
-
-              <SectionTitle>Concluídas</SectionTitle>
-              {sel.tasks && sel.tasks.filter(t => t.done).map(t => (
-                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: "#f8f3ea", borderRadius: 8, border: "1px solid #e8dfc8", marginBottom: 6, opacity: .6 }}>
-                  <button onClick={() => toggleTask(t.id)}
-                    style={{ width: 22, height: 22, borderRadius: "50%", border: "none", background: gold, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-</button>
-                  <div style={{ flex: 1, fontSize: 13, color: "#aaa", textDecoration: "line-through" }}>{t.text}</div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* SUBMODAL AULA */}
-          {subModal === "lesson" && (
-            <Modal title="Registrar aula" onClose={() => setSubModal(null)}>
-              <div style={{ display: "flex", gap: 10 }}>
-                <Inp label="Data " value={lessonForm.date} onChange={lf("date")} type="date" half />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Status</label>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {LESSON_STATUS.map(s => (
-                      <button key={s} onClick={lf("status")(s)}
-                        style={{ flex: 1, padding: "6px", borderRadius: 8, border: "2px solid", borderColor: lessonForm.status === s ? LESSON_STATUS_COLORS[s].border : "#ddd", background: lessonForm.status === s ? LESSON_STATUS_COLORS[s].bg : "#fff", fontSize: 11, cursor: "pointer", color: lessonForm.status === s ? LESSON_STATUS_COLORS[s].text : "#888", fontWeight: lessonForm.status === s ? 700 : 400 }}>
-                        {LESSON_STATUS_COLORS[s].icon} {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>AS */}
           {detailTab === "tarefas" && (
             <div>
               <SectionTitle action={
