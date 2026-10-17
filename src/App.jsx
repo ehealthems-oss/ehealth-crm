@@ -495,7 +495,7 @@ export default function CRM() {
 
   // ── RENDER ──
   return (
-    <div style={{ fontFamily: "'Segoe UI'lsystem-ui,sans-serif", background: cream, minHeight: "100vh", color: "#2a2218" }}>
+    <div style={{ fontFamily: "'Segoe UI',system-ui,sans-serif", background: cream, minHeight: "100vh", color: "#2a2218" }}>
 
       {/* Header */}
       <div style={{ background: navy, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, position: "sticky", top: 0, zIndex: 50 }}>
@@ -810,7 +810,7 @@ export default function CRM() {
                 <div style={{ fontWeight: 700, color: navy, marginBottom: 8, fontSize: 13 }}>📄 Relatório Postural/Funcional (PDF)</div>
                 {sel.reportUrl ? (
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <a href={sel.reportUrl} target="_blank" rel="noopener"
+                    <a href={sel.reportUrl} target="_blank" rel="noopener"
                       style={{ flex: 1, padding: "8px 14px", background: navy, color: gold, borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none", textAlign: "center" }}>
                       Abrir PDF ↗
                     </a>
@@ -822,7 +822,7 @@ export default function CRM() {
                 ) : (
                   <button onClick={() => fileInputRef.current?.click()} disabled={aiLoading}
                     style={{ width: "100%", padding: "14px", border: "2px dashed #c9b89a", borderRadius: 8, background: "#fffdf8", cursor: "pointer", color: "#888", fontSize: 13 }}>
-                    {aiLoading ? "⏳ Enviando‖" : "📎 Clique para fazer upload do PDF"}
+                    {aiLoading ? "⏳ Enviando…" : "📎 Clique para fazer upload do PDF"}
                   </button>
                 )}
                 <input ref={fileInputRef} type="file" accept=".pdf" style={{ display: "none" }}
@@ -856,41 +856,6 @@ export default function CRM() {
           {/* TAB AVALIAÇÕES */}
           {detailTab === "avaliacoes" && (
             <div>
-              <SectionTitle action={
-                <button onClick={() => setSubModal("assess")} style={{ background: navy, color: gold, border: "none", borderRadius: 6, padding: "4px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ Nova</button>
-              }>Avaliações</SectionTitle>
-              {avalStatus(sel).map(s => (
-                <div key={s.type} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 8, background: "#f8f3ea", marginBottom: 6, border: "1px solid #e4daca" }}>
-                  <span style={{ fontWeight: 700, fontSize: 13, color: navy, flex: 1 }}>{s.type}</span>
-                  <span style={{ fontSize: 12, color: "#888" }}>{sortedDate(s.lastDate)}</span>
-                  {s.daysLeft !== null && <AlertBadge days={s.daysLeft} label={`Próxima ${s.type}`} />}
-                </div>
-              ))}
-              {(sel.assessments || []).length === 0 && <div style={{ fontSize: 13, color: "#aaa", padding: "12px 0" }}>Nenhuma avaliação registrada.</div>}
-              {sel.assessments.map((a, i) => (
-                <div key={i} style={{ background: "#f8f3ea", borderRadius: 8, padding: "12px 14px", marginBottom: 8, border: "1px solid #e4daca" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontWeight: 700, fontSize: 14, color: navy }}>{a.type}</span>
-                    <span style={{ fontSize: 12, color: "#888" }}>{sortedDate(a.date)}</span>
-                  </div>
-                  {(a.professional || a.notes) && <div style={{ fontSize: 12, color: "#555" }}>{a.professional ? `👤 Avaliador: ${a.professional}` : ""}{a.notes ? (a.professional ? " • " : "") + a.notes : ""}</div>}
-                  <button onClick={() => updateSel(c => ({ ...c, assessments: c.assessments.filter((_, j) => j !== i) }))}
-                    style={{ marginTop: 8, background: "none", border: "none", color: "#c0392b", fontSize: 12, cursor: "pointer" }}>Remover</button>
-                </div>
-              ))}
-            </div>
-          )}, textDecoration: "none", whiteSpace: "nowrap" }}>
-                      Abrir ↗
-                    </a>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB AVALIAÇÕES */}
-          {detailTab === "avaliacoes" && (
-            <div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 16 }}>
                 {avalStatus(sel).map(({ type, lastDate, nextDate, daysLeft }) => {
                   const hasAval = !!lastDate;
@@ -910,7 +875,7 @@ export default function CRM() {
                         <>
                           <div style={{ fontSize: 12, color: "#555" }}>Última: <b>{fmtDate(lastDate)}</b></div>
                           <div style={{ fontSize: 12, marginTop: 3, color: overdue ? "#c0392b" : urgent ? "#b05e1a" : warn ? "#7a6000" : "#2d7a4f", fontWeight: 600 }}>
-                            {overdue ? `⚠️ Vencida há ${Math.abs(daysLeft)}d` :
+                            {overdue ? `⚠️ Vencida ha ${Math.abs(daysLeft)}d` :
                               urgent ? `🔶 Vence em ${daysLeft}d` :
                               warn ? `📅 Vence em ${daysLeft}d` :
                               `✅ Próxima: ${fmtDate(nextDate)}`}
@@ -925,7 +890,7 @@ export default function CRM() {
               </div>
 
               <SectionTitle>Histórico de avaliações</SectionTitle>
-              {(sel.assessments || []).length === 0 ? (
+              {(!sel.assessments || sel.assessments.length === 0) ? (
                 <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "16px 0" }}>Nenhuma avaliação registrada.</div>
               ) : [...(sel.assessments || [])].sort((a, b) => b.date > a.date ? 1 : -1).map(a => (
                 <div key={a.id} style={{ background: "#f8f3ea", borderRadius: 8, padding: "10px 14px", fontSize: 13, marginBottom: 8, border: "1px solid #e8dfc8" }}>
@@ -1003,12 +968,14 @@ export default function CRM() {
                         <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 12, color: "#555" }}>
                           {l.dormiu && <div>😴 Dormiu bem: <b>{l.dormiu}</b></div>}
                           {l.descansado && <div>⚡ Descansado: <b>{l.descansado}</b></div>}
-                          {l.dor !== null && l.dor !== undefined && <div>🤕 Dor/desconforto: <b>{l.dor}/10</b></div>}
-                          {l.alimentacao && <div style={{ gridColumn: "1/-1" }}>🍎 Alimentação: {l.alimentacao}</div>}
-                          {l.musculosTrabalhados && <div style={{ gridColumn: "1/-1" }}>💪 Músculos: {l.musculosTrabalhados}</div>}
-                          {l.adaptacoes && <div style={{ gridColumn: "1/-1" }}>🔧 Adaptações: {l.adaptacoes}</div>}
-                          {l.riscoRetencao && <div style={{ gridColumn: "1/-1", color: "#c0392b", fontWeight: 600 }}>⚠️ Risco: {l.riscoRetencao}</div>}
-                          {l.observacaoGeral && <div style={{ gridColumn: "1/-1", marginTop: 4, padding: "6px 8px", background: "#f8f3ea", borderRadius: 6 }}>📝 {l.observacaoGeral}</div>}
+                          {l.dores && <div>📫 Dores: <b>{l.dores}</b></div>}
+                          {l.alteracao && <div>💦 Alteração corporal: <b>{l.alteracao}</b></div>}
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+                          <button onClick={() => { setLessonForm(l); setSubModal("lesson"); }}
+                            style={{ background: "#f0ebe0", color: "#555", border: "1px solid #ddd", borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>
+                            Editar
+                          </button>
                         </div>
                       </div>
                     )}
@@ -1016,37 +983,7 @@ export default function CRM() {
                 );
               })}
             </div>
-          )}
-
-          {/* TAB TOUCHPOINTS */}
-          {detailTab === "touchpoints" && (
-            <div>
-              <SectionTitle action={
-                <button onClick={() => { setTouchForm({ date: today(), channel: "WhatsApp", direction: "Saída", summary: "" }); setSubModal("touch"); }}
-                  style={{ background: gold, color: navy, border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                  + Registrar contato
-                </button>
-              }>Touch points</SectionTitle>
-              {(sel.touchpoints || []).length === 0 ? (
-                <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "20px 0" }}>Nenhum contato registrado.</div>
-              ) : [...(sel.touchpoints || [])].sort((a, b) => b.date > a.date ? 1 : -1).map(tp => (
-                <div key={tp.id} style={{ display: "flex", gap: 10, padding: "9px 12px", background: "#fff", borderRadius: 8, border: "1px solid #e8dfc8", marginBottom: 6 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: tp.direction === "Saída" ? navy + "15" : gold + "25", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
-                    {tp.channel === "WhatsApp" ? "💬" : tp.channel === "Ligação" ? "📞" : "🤝"}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-                      <span style={{ fontWeight: 600, fontSize: 12, color: navy }}>{tp.channel} · {tp.direction}</span>
-                      <span style={{ fontSize: 11, color: "#aaa" }}>{fmtDateShort(tp.date)}</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: "#555" }}>{tp.summary}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* TAB TAREF         {l.dor !== null && l.dor !== undefined && <div>🤕 Dor/desconforto: <b>{l.dor}/10</b></div>}
+          )}         {l.dor !== null && l.dor !== undefined && <div>🤕 Dor/desconforto: <b>{l.dor}/10</b></div>}
                           {l.alimentacao && <div style={{ gridColumn: "1/-1" }}>🍎 Alimentação: {l.alimentacao}</div>}
                           {l.musculosTrabalhados && <div style={{ gridColumn: "1/-1" }}>💪 Músculos: {l.musculosTrabalhados}</div>}
                           {l.adaptacoes && <div style={{ gridColumn: "1/-1" }}>🔧 Adaptações: {l.adaptacoes}</div>}
