@@ -50,10 +50,12 @@ function instalarGatilho() {
 
 // Teste manual: processa a última resposta da planilha
 function testarUltimaResposta() {
-  const sheet = SpreadsheetApp.getActive().getSheets()[0];
-  const rows = sheet.getDataRange().getDisplayValues();
+  const sheets = SpreadsheetApp.getActive().getSheets();
+  const sheet = sheets.find(s => s.getFormUrl()) || sheets[0];
+  const rows = sheet.getDataRange().getDisplayValues().filter(r => r.some(Boolean));
   const headers = rows[0];
   const last = rows[rows.length - 1];
+  Logger.log("Aba: " + sheet.getName() + " | linha " + rows.length);
   const named = {};
   headers.forEach((h, i) => { (named[h] = named[h] || []).push(last[i]); });
   syncResposta(named);
@@ -105,8 +107,9 @@ function syncResposta(named) {
     Object.keys(fromAnamnese).forEach(k => {
       if (fromAnamnese[k] && !String(match[k] || "").trim()) patch[k] = fromAnamnese[k];
     });
-    supa("patch", "clients?id=eq." + encodeURIComponent(match.id), patch);
-    Logger.log("Atualizado: " + match.id);
+    const saved = supa("patch", "clients?id=eq." + encodeURIComponent(match.id), patch);
+    Logger.log("Atualizado: " + match.id + " | campos: " + Object.keys(patch).join(", ") +
+      " | linhas gravadas: " + (saved ? saved.length : 0));
   } else {
     const novo = { ...fromAnamnese, stage: "Prospecção", anamneseDone: true };
     Object.keys(novo).forEach(k => { if (novo[k] === "") delete novo[k]; });
