@@ -26,7 +26,7 @@ const LESSON_STATUS_COLORS = {
 const EMPTY_CLIENT = {
   name: "", phone: "", email: "", birthday: "", stage: "Cliente ativo",
   location: "In Home", emsFreq: "EMS 2x/semana", professional: "", notes: "",
-  anamneseLink: "", anamneseDone: false,
+  anamnese: null, // respostas completas do Google Forms: { submittedAt, answers: [{ q, a }] }
   startDate: "", // data de início para LTV
   reportUrl: "", // PDF do relatório
   attentionPoints: "", // pontos de atenção extraídos/editados
@@ -440,34 +440,6 @@ export default function CRM() {
     }
   };
 
-  // ── Extração de pontos de atenção via IA (Edge Function) ──
-  const extractAttentionPoints = async () => {
-    if (!sel?.reportUrl && !sel?.anamneseLink) {
-      alert("Adicione o PDF do relatório ou o link da anamnese primeiro.");
-      return;
-    }
-    setAiLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("extract-attention-points", {
-        body: {
-          clientName: sel.name,
-          reportUrl: sel.reportUrl || null,
-          anamneseLink: sel.anamneseLink || null,
-        },
-      });
-      if (error) throw error;
-      const points = data?.attentionPoints || "Nenhum ponto de atenção identificado.";
-      await updateSel(c => ({ ...c, attentionPoints: points }));
-    } catch (e) {
-      console.error("AI extraction error:", e);
-      // Fallback: prompt manual
-      await updateSel(c => ({ ...c, attentionPoints: sel.attentionPoints || "" }));
-      alert("Extração automática indisponível. Você pode preencher manualmente os pontos de atenção.");
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
   const filtered = clients.filter(c => {
     const q = search.toLowerCase();
     return (!q || c.name.toLowerCase().includes(q) || (c.phone || "").includes(q)) &&
@@ -808,17 +780,11 @@ export default function CRM() {
             <div>
               {/* Pontos de atenção */}
               <div style={{ background: "#fff8e8", borderRadius: 10, padding: "14px 16px", marginBottom: 16, border: "1px solid #f0d080" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ fontWeight: 700, fontSize: 13, color: navy }}>⚠️ Pontos de atenção (IA)</span>
-                  <button onClick={extractAttentionPoints} disabled={aiLoading}
-                    style={{ background: navy, color: gold, border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: aiLoading ? "default" : "pointer", opacity: aiLoading ? .6 : 1 }}>
-                    {aiLoading ? "Analisando…" : "🤖 Extrair"}
-                  </button>
-                </div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: navy, marginBottom: 8 }}>⚠️ Pontos de atenção (IA)</div>
                 <textarea value={sel.attentionPoints || ""} onChange={e => updateSel(c => ({ ...c, attentionPoints: e.target.value }))}
                   rows={4} placeholder="Patologias, contraindicações, pontos de atenção identificados na anamnese e relatório…"
                   style={{ width: "100%", padding: "8px 12px", border: "1px solid #e0c860", borderRadius: 8, fontSize: 13, background: "#fffdf0", color: "#2a2218", boxSizing: "border-box", outline: "none", resize: "vertical" }} />
-                <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>O campo é editável. A IA preenche automaticamente quando você clica em "Extrair".</div>
+                <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>Gerado pela IA quando a anamnese chega. O campo é editável.</div>
               </div>
 
               {/* Relatório PDF */}
@@ -845,26 +811,22 @@ export default function CRM() {
                   onChange={e => { const f = e.target.files?.[0]; if (f) handleReportUpload(f); e.target.value = ""; }} />
               </div>
 
-              {/* Anamnese */}
+              {/* Anamnese completa */}
               <div style={{ background: "#f8f3ea", borderRadius: 10, padding: "14px 16px", border: "1px solid #e8dfc8" }}>
-                <div style={{ fontWeight: 700, color: navy, marginBottom: 8, fontSize: 13 }}>📋 Anamnese (Google Forms)</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                  <button onClick={() => updateSel(c => ({ ...c, anamneseDone: !c.anamneseDone }))}
-                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8, border: "2px solid", borderColor: sel.anamneseDone ? "#2d7a4f" : "#c9b89a", background: sel.anamneseDone ? "#e8f8ee" : "#fffdf8", cursor: "pointer", fontWeight: 700, fontSize: 13, color: sel.anamneseDone ? "#2d7a4f" : "#888" }}>
-                    {sel.anamneseDone ? "✅ Anamnese realizada" : "◻️ Anamnese pendente"}
-                  </button>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 700, color: navy, fontSize: 13 }}>📋 Anamnese</span>
+                  {sel.anamnese?.submittedAt && <span style={{ fontSize: 11, color: "#888" }}>Respondida em {sel.anamnese.submittedAt}</span>}
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input value={sel.anamneseLink || ""} onChange={e => updateSel(c => ({ ...c, anamneseLink: e.target.value }))}
-                    placeholder="Cole aqui o link do Google Forms…"
-                    style={{ flex: 1, padding: "8px 12px", border: "1px solid #c9b89a", borderRadius: 8, fontSize: 13, background: "#fffdf8", color: "#2a2218", outline: "none" }} />
-                  {sel.anamneseLink && (
-                    <a href={sel.anamneseLink} target="_blank" rel="noopener"
-                      style={{ padding: "8px 14px", background: navy, color: gold, borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap" }}>
-                      Abrir ↗
-                    </a>
-                  )}
-                </div>
+                {!(sel.anamnese?.answers || []).length ? (
+                  <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "12px 0" }}>
+                    A anamnese aparece aqui automaticamente quando o cliente preenche o formulário.
+                  </div>
+                ) : sel.anamnese.answers.map((x, i) => (
+                  <div key={i} style={{ padding: "8px 0", borderTop: i ? "1px solid #e8dfc8" : "none", fontSize: 13 }}>
+                    <div style={{ color: "#888", fontSize: 12, marginBottom: 2 }}>{x.q}</div>
+                    <div style={{ color: "#2a2218", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{x.a}</div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
