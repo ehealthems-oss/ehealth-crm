@@ -875,7 +875,7 @@ export default function CRM() {
                         <>
                           <div style={{ fontSize: 12, color: "#555" }}>Última: <b>{fmtDate(lastDate)}</b></div>
                           <div style={{ fontSize: 12, marginTop: 3, color: overdue ? "#c0392b" : urgent ? "#b05e1a" : warn ? "#7a6000" : "#2d7a4f", fontWeight: 600 }}>
-                            {overdue ? `⚠️ Vencida ha ${Math.abs(daysLeft)}d` :
+                            {overdue ? `⚠️ Vencida há ${Math.abs(daysLeft)}d` :
                               urgent ? `🔶 Vence em ${daysLeft}d` :
                               warn ? `📅 Vence em ${daysLeft}d` :
                               `✅ Próxima: ${fmtDate(nextDate)}`}
@@ -890,7 +890,7 @@ export default function CRM() {
               </div>
 
               <SectionTitle>Histórico de avaliações</SectionTitle>
-              {(!sel.assessments || sel.assessments.length === 0) ? (
+              {(sel.assessments || []).length === 0 ? (
                 <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "16px 0" }}>Nenhuma avaliação registrada.</div>
               ) : [...(sel.assessments || [])].sort((a, b) => b.date > a.date ? 1 : -1).map(a => (
                 <div key={a.id} style={{ background: "#f8f3ea", borderRadius: 8, padding: "10px 14px", fontSize: 13, marginBottom: 8, border: "1px solid #e8dfc8" }}>
@@ -968,22 +968,7 @@ export default function CRM() {
                         <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 12, color: "#555" }}>
                           {l.dormiu && <div>😴 Dormiu bem: <b>{l.dormiu}</b></div>}
                           {l.descansado && <div>⚡ Descansado: <b>{l.descansado}</b></div>}
-                          {l.dores && <div>📫 Dores: <b>{l.dores}</b></div>}
-                          {l.alteracao && <div>💦 Alteração corporal: <b>{l.alteracao}</b></div>}
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-                          <button onClick={() => { setLessonForm(l); setSubModal("lesson"); }}
-                            style={{ background: "#f0ebe0", color: "#555", border: "1px solid #ddd", borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>
-                            Editar
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}         {l.dor !== null && l.dor !== undefined && <div>🤕 Dor/desconforto: <b>{l.dor}/10</b></div>}
+                          {l.dor !== null && l.dor !== undefined && <div>🤕 Dor/desconforto: <b>{l.dor}/10</b></div>}
                           {l.alimentacao && <div style={{ gridColumn: "1/-1" }}>🍎 Alimentação: {l.alimentacao}</div>}
                           {l.musculosTrabalhados && <div style={{ gridColumn: "1/-1" }}>💪 Músculos: {l.musculosTrabalhados}</div>}
                           {l.adaptacoes && <div style={{ gridColumn: "1/-1" }}>🔧 Adaptações: {l.adaptacoes}</div>}
