@@ -30,6 +30,7 @@ const EMPTY_CLIENT = {
   startDate: "", // data de início para LTV
   reportUrl: "", // PDF do relatório
   attentionPoints: "", // pontos de atenção extraídos/editados
+  height: "", weight: "", goals: "", // vindos da anamnese
   assessments: [], lessons: [], touchpoints: [], tasks: [],
 };
 
@@ -666,6 +667,11 @@ export default function CRM() {
           <div style={{ display: "flex", gap: 10 }}>
             <Inp label="Data de início (LTV)" value={form.startDate} onChange={ff("startDate")} type="date" half />
           </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Inp label="Altura" value={form.height} onChange={ff("height")} placeholder="Ex: 1,65" half />
+            <Inp label="Peso" value={form.weight} onChange={ff("weight")} placeholder="Ex: 60 kg" half />
+          </div>
+          <TA label="Objetivos" value={form.goals} onChange={ff("goals")} rows={2} />
           <Sel label="Status" value={form.stage} onChange={ff("stage")} options={CLIENT_STAGES} />
           <div style={{ marginBottom: 13 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Local</label>
@@ -748,6 +754,8 @@ export default function CRM() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", fontSize: 13, marginBottom: 14 }}>
                 {sel.phone && <div><span style={{ color: "#888" }}>📱 </span><a href={`https://wa.me/55${sel.phone.replace(/\D/g, "")}`} target="_blank" rel="noopener" style={{ color: navy, textDecoration: "none", fontWeight: 600 }}>{sel.phone}</a></div>}
                 {sel.email && <div><span style={{ color: "#888" }}>✉️ </span>{sel.email}</div>}
+                {sel.height && <div><span style={{ color: "#888" }}>📏 </span>{sel.height}</div>}
+                {sel.weight && <div><span style={{ color: "#888" }}>⚖️ </span>{sel.weight}</div>}
                 {sel.birthday && (
                   <div style={{ gridColumn: "1/-1" }}>
                     <span style={{ color: "#888" }}>🎂 </span>
@@ -757,6 +765,14 @@ export default function CRM() {
                   </div>
                 )}
               </div>
+
+              {/* Objetivos */}
+              {sel.goals && (
+                <div style={{ background: "#eef4ff", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #c0d0f0" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: navy, marginBottom: 6 }}>🎯 Objetivos</div>
+                  <div style={{ fontSize: 13, color: "#555", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{sel.goals}</div>
+                </div>
+              )}
 
               {/* Pontos de atenção */}
               {sel.attentionPoints && (
