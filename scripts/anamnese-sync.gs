@@ -52,10 +52,14 @@ function instalarGatilho() {
 function testarUltimaResposta() {
   const sheets = SpreadsheetApp.getActive().getSheets();
   const sheet = sheets.find(s => s.getFormUrl()) || sheets[0];
-  const rows = sheet.getDataRange().getDisplayValues().filter(r => r.some(Boolean));
+  const rows = sheet.getDataRange().getDisplayValues();
   const headers = rows[0];
-  const last = rows[rows.length - 1];
-  Logger.log("Aba: " + sheet.getName() + " | linha " + rows.length);
+  const nameCol = headers.findIndex(h => norm(h).startsWith(norm(Q.name)));
+  let n = rows.length - 1;
+  while (n > 0 && !String(rows[n][nameCol] || "").trim()) n--;
+  if (n === 0) return Logger.log("Nenhuma resposta com nome encontrada.");
+  const last = rows[n];
+  Logger.log("Aba: " + sheet.getName() + " | linha " + (n + 1));
   const named = {};
   headers.forEach((h, i) => { (named[h] = named[h] || []).push(last[i]); });
   syncResposta(named);
@@ -72,7 +76,7 @@ function syncResposta(named) {
   };
 
   const name = get(Q.name);
-  if (!name) return;
+  if (!name) return Logger.log("Resposta sem nome — ignorada.");
   const email = get(Q.email).toLowerCase();
 
   const fromAnamnese = {
