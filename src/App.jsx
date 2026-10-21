@@ -94,6 +94,10 @@ const getAge = bdStr => {
 };
 
 // LTV: calcula tempo de cliente a partir da primeira aula ou startDate
+// Cadastro incompleto: sem anamnese recebida
+const isIncomplete = c => !(c.anamnese?.answers || []).length;
+const INCOMPLETE_STYLE = { fontSize: 11, color: "#b05e1a", fontWeight: 700, background: "#fff8e8", border: "1px solid #f0d080", borderRadius: 10, padding: "2px 8px" };
+
 const calcLTV = c => {
   let startStr = c.startDate;
   if (!startStr && (c.lessons || []).length > 0) {
@@ -622,6 +626,7 @@ export default function CRM() {
                   {bd !== null && bd <= 14 && <span style={{ fontSize: 11, color: "#e67e22", fontWeight: 600 }}>🎂{bd}d</span>}
                   {aa && <span style={{ fontSize: 11, color: "#c0392b", fontWeight: 600 }}>📄{aa.daysLeft < 0 ? "vencido" : aa.daysLeft + "d"}</span>}
                   {(c.lessons || []).length >= 2 && <span style={{ fontSize: 11, color, fontWeight: 700 }}>🌡️{level}</span>}
+                  {isIncomplete(c) && <span style={INCOMPLETE_STYLE}>⚠️ Incompleto</span>}
                   <Badge stage={c.stage} />
                 </div>
               </div>
@@ -696,6 +701,7 @@ export default function CRM() {
 
           {/* Alertas */}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {isIncomplete(sel) && <span style={INCOMPLETE_STYLE}>⚠️ Cadastro incompleto: sem anamnese</span>}
             {nextBirthdayDays(sel.birthday) !== null && nextBirthdayDays(sel.birthday) <= 14 && <AlertBadge days={nextBirthdayDays(sel.birthday)} label="🎂" />}
             {nextAvalAlert(sel) && <AlertBadge days={nextAvalAlert(sel).daysLeft} label="📄 Relatório" />}
           </div>

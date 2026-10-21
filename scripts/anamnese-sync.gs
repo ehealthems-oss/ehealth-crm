@@ -82,6 +82,8 @@ function testarUltimaResposta(opts) {
 // A lista NÃO fica no repositório (é público): preencha só na cópia colada no Apps Script.
 const CLIENTES_ATIVOS = [];
 const STAGE_ATIVO = "Cliente ativo";
+// Nomes da lista que não correspondem a nenhuma anamnese (entram só com o nome)
+const FORCAR_SEM_ANAMNESE = [];
 
 // Passo 1: só lê e mostra o que seria feito (não grava nada)
 function previaClientesAtivos() {
@@ -128,6 +130,7 @@ function planoAtivos() {
   const nomes = Object.keys(porNome);
 
   return CLIENTES_ATIVOS.map(lista => {
+    if (FORCAR_SEM_ANAMNESE.some(n => norm(n) === norm(lista))) return { lista, status: "SEM ANAMNESE", detalhe: "será criado só com o nome" };
     const alvo = norm(lista).split(" ");
     const exato = nomes.filter(n => n === norm(lista));
     const achados = exato.length ? exato : nomes.filter(n => alvo.every(w => n.split(" ").includes(w)));
