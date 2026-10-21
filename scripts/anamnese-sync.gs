@@ -59,6 +59,37 @@ function refazerPontosUltimaResposta() {
   testarUltimaResposta({ forcePoints: true });
 }
 
+// Testa a chave da IA com uma anamnese de exemplo (não grava nada)
+function testarIA() {
+  const key = PropertiesService.getScriptProperties().getProperty("ANTHROPIC_API_KEY");
+  if (!key) return Logger.log("❌ Falta a propriedade ANTHROPIC_API_KEY nas Configurações do projeto.");
+  const r = gerarPontosAtencao([{ q: "Possui alguma patologia?", a: "Hérnia de disco L4-L5" }]);
+  Logger.log(r ? "✅ IA funcionando:\n" + r : "❌ A IA não respondeu — veja a mensagem acima.");
+}
+
+// Refaz com IA os pontos de atenção de todos os clientes que têm anamnese.
+// Substitui o texto atual. Pode rodar de novo se parar no meio (continua de onde parou).
+function refazerPontosTodos() {
+  const props = PropertiesService.getScriptProperties();
+  const feitos = JSON.parse(props.getProperty("PONTOS_FEITOS") || "[]");
+  const inicio = Date.now();
+  const clients = supa("get", "clients?select=id,name,anamnese&order=name");
+  const pendentes = clients.filter(c => ((c.anamnese && c.anamnese.answers) || []).length && !feitos.includes(c.id));
+  for (const c of pendentes) {
+    if (Date.now() - inicio > 4.5 * 60 * 1000) {
+      return Logger.log("⏸️ Tempo quase esgotado. Clique em Executar de novo para continuar (faltam " + (pendentes.length - pendentes.indexOf(c)) + ").");
+    }
+    const pontos = gerarPontosAtencao(c.anamnese.answers);
+    if (!pontos) return Logger.log("❌ A IA não respondeu para " + c.name + ". Nada mais foi alterado — confira a chave com testarIA.");
+    supa("patch", "clients?id=eq." + encodeURIComponent(c.id), { attentionPoints: pontos });
+    feitos.push(c.id);
+    props.setProperty("PONTOS_FEITOS", JSON.stringify(feitos));
+    Logger.log("✅ " + c.name);
+  }
+  props.deleteProperty("PONTOS_FEITOS");
+  Logger.log("✅ Concluído: todos os pontos de atenção foram refeitos com IA.");
+}
+
 // Teste manual: processa a última resposta da planilha
 function testarUltimaResposta(opts) {
   const sheets = SpreadsheetApp.getActive().getSheets();
