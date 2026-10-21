@@ -151,24 +151,24 @@ const calcRisk = c => {
   return { score: pct, level: "Saudável", color: "#2d7a4f" };
 };
 
-// Avaliações: próximas por tipo (2 meses)
-const avalStatus = c => {
-  const assessments = c.assessments || [];
-  return AVAL_TYPES.map(type => {
-    const ofType = assessments.filter(a => a.type === type).sort((a, b) => b.date > a.date ? 1 : -1);
-    const last = ofType[0];
-    if (!last) return { type, lastDate: null, nextDate: null, daysLeft: null };
-    const next = new Date(last.date + "T12:00:00");
-    next.setMonth(next.getMonth() + 2);
-    const nextStr = next.toISOString().split("T")[0];
-    return { type, lastDate: last.date, nextDate: nextStr, daysLeft: daysUntil(nextStr) };
-  });
+// Relatórios: as 4 avaliações compõem um único relatório (1 PDF), refeito a cada 3 meses.
+// Cada item de c.assessments é um relatório: { id, date, professional, checks: { Postural: true, ... }, reportUrl, notes }
+const REPORT_MONTHS = 3;
+const reportDone = r => AVAL_TYPES.every(t => r.checks?.[t]);
+const sortedReports = c => [...(c.assessments || [])].sort((a, b) => b.date > a.date ? 1 : -1);
+
+const reportStatus = c => {
+  const last = sortedReports(c).find(reportDone);
+  if (!last) return { lastDate: null, nextDate: null, daysLeft: null };
+  const next = new Date(last.date + "T12:00:00");
+  next.setMonth(next.getMonth() + REPORT_MONTHS);
+  const nextStr = next.toISOString().split("T")[0];
+  return { lastDate: last.date, nextDate: nextStr, daysLeft: daysUntil(nextStr) };
 };
 
 const nextAvalAlert = c => {
-  const statuses = avalStatus(c).filter(s => s.daysLeft !== null && s.daysLeft <= 14);
-  if (!statuses.length) return null;
-  return statuses.sort((a, b) => a.daysLeft - b.daysLeft)[0];
+  const s = reportStatus(c);
+  return s.daysLeft !== null && s.daysLeft <= 14 ? s : null;
 };
 
 const lessonStats = c => {
@@ -336,11 +336,11 @@ function SectionTitle({ children, action }) {
 }
 
 function AlertBadge({ days, label }) {
-  if (days === null || days < 0 || days > 30) return null;
+  if (days === null || days > 30) return null;
   const urgent = days <= 7;
   return (
     <span style={{ background: urgent ? "#ffeaea" : "#fff8e8", color: urgent ? "#c0392b" : "#b05e1a", border: `1px solid ${urgent ? "#f5c6c6" : "#f0d080"}`, borderRadius: 16, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>
-      {label} {days === 0 ? "hoje" : `em ${days}d`}
+      {label} {days < 0 ? `vencido há ${-days}d` : days === 0 ? "hoje" : `em ${days}d`}
     </span>
   );
 }
@@ -357,7 +357,6 @@ export default function CRM() {
   const [sel, setSel] = useState(null);
   const [detailTab, setDetailTab] = useState("geral");
   const [form, setForm] = useState({ ...EMPTY_CLIENT });
-  const [assessForm, setAssessForm] = useState({ type: "Postural", date: today(), professional: "", notes: "" });
   const [lessonForm, setLessonForm] = useState({ ...EMPTY_LESSON, date: today() });
   const [touchForm, setTouchForm] = useState({ date: today(), channel: "WhatsApp", direction: "Saída", summary: "" });
   const [taskForm, setTaskForm] = useState({ title: "", dueDate: "", done: false });
@@ -416,7 +415,8 @@ export default function CRM() {
   const lf = k => v => setLessonForm(f => ({ ...f, [k]: v }));
 
   // ── Upload de relatório PDF ──
-  const handleReportUpload = async (file) => {
+  // reportId: quando vem da aba Avaliações, o PDF também fica anexado a esse relatório
+  const handleReportUpload = async (file, reportId) => {
     if (!file || !sel) return;
     setAiLoading(true);
     try {
@@ -431,7 +431,11 @@ export default function CRM() {
         .from("client-files")
         .getPublicUrl(path);
 
-      await updateSel(c => ({ ...c, reportUrl: urlData.publicUrl }));
+      await updateSel(c => ({
+        ...c,
+        reportUrl: urlData.publicUrl,
+        assessments: reportId ? (c.assessments || []).map(r => r.id === reportId ? { ...r, reportUrl: urlData.publicUrl } : r) : c.assessments,
+      }));
     } catch (e) {
       console.error("Upload error:", e);
       alert("Erro ao fazer upload: " + (e.message || "tente novamente"));
@@ -517,7 +521,7 @@ export default function CRM() {
                   <span style={{ flex: 1, fontWeight: 600, fontSize: 13, color: navy }}>{c.name}</span>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {bd !== null && bd <= 14 && <AlertBadge days={bd} label="🎂" />}
-                    {avalAlert && <AlertBadge days={avalAlert.daysLeft} label={`📋 ${avalAlert.type}`} />}
+                    {avalAlert && <AlertBadge days={avalAlert.daysLeft} label="📄 Relatório" />}
                     {risk.level === "Alto" && <span style={{ fontSize: 11, color: "#c0392b", fontWeight: 700, background: "#ffeaea", border: "1px solid #f5c6c6", borderRadius: 10, padding: "2px 8px" }}>🌡️ Alto risco</span>}
                   </div>
                 </div>
@@ -614,7 +618,7 @@ export default function CRM() {
                   {s.done > 0 && <span style={{ fontSize: 11, color: "#2d7a4f", fontWeight: 600 }}>✅{s.done}</span>}
                   {s.canceled > 0 && <span style={{ fontSize: 11, color: "#c0392b", fontWeight: 600 }}>❌{s.canceled}</span>}
                   {bd !== null && bd <= 14 && <span style={{ fontSize: 11, color: "#e67e22", fontWeight: 600 }}>🎂{bd}d</span>}
-                  {aa && <span style={{ fontSize: 11, color: "#c0392b", fontWeight: 600 }}>📋{aa.daysLeft}d</span>}
+                  {aa && <span style={{ fontSize: 11, color: "#c0392b", fontWeight: 600 }}>📄{aa.daysLeft < 0 ? "vencido" : aa.daysLeft + "d"}</span>}
                   {(c.lessons || []).length >= 2 && <span style={{ fontSize: 11, color, fontWeight: 700 }}>🌡️{level}</span>}
                   <Badge stage={c.stage} />
                 </div>
@@ -690,9 +694,7 @@ export default function CRM() {
           {/* Alertas */}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
             {nextBirthdayDays(sel.birthday) !== null && nextBirthdayDays(sel.birthday) <= 14 && <AlertBadge days={nextBirthdayDays(sel.birthday)} label="🎂" />}
-            {avalStatus(sel).filter(s => s.daysLeft !== null && s.daysLeft <= 14).map(s => (
-              <AlertBadge key={s.type} days={s.daysLeft} label={`📋 ${s.type}`} />
-            ))}
+            {nextAvalAlert(sel) && <AlertBadge days={nextAvalAlert(sel).daysLeft} label="📄 Relatório" />}
           </div>
 
           {/* Termômetro */}
@@ -789,7 +791,7 @@ export default function CRM() {
 
               {/* Relatório PDF */}
               <div style={{ background: "#f8f3ea", borderRadius: 10, padding: "14px 16px", marginBottom: 16, border: "1px solid #e8dfc8" }}>
-                <div style={{ fontWeight: 700, color: navy, marginBottom: 8, fontSize: 13 }}>📄 Relatório Postural/Funcional (PDF)</div>
+                <div style={{ fontWeight: 700, color: navy, marginBottom: 8, fontSize: 13 }}>📄 Relatório de avaliação (PDF)</div>
                 {sel.reportUrl ? (
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <a href={sel.reportUrl} target="_blank" rel="noopener"
@@ -832,73 +834,107 @@ export default function CRM() {
           )}
 
           {/* TAB AVALIAÇÕES */}
-          {detailTab === "avaliacoes" && (
+          {detailTab === "avaliacoes" && (() => {
+            const st = reportStatus(sel);
+            const reports = sortedReports(sel);
+            const current = reports[0];
+            const overdue = st.daysLeft !== null && st.daysLeft < 0;
+            const urgent = st.daysLeft !== null && st.daysLeft <= 7;
+            const warn = st.daysLeft !== null && st.daysLeft <= 14;
+            const updateReport = (id, fn) => updateSel(c => ({ ...c, assessments: (c.assessments || []).map(r => r.id === id ? fn(r) : r) }));
+            const startReport = () => updateSel(c => ({ ...c, assessments: [{ id: Date.now().toString(), date: today(), professional: c.professional || "", checks: {}, reportUrl: "", notes: "" }, ...(c.assessments || [])] }));
+            return (
             <div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 16 }}>
-                {avalStatus(sel).map(({ type, lastDate, nextDate, daysLeft }) => {
-                  const hasAval = !!lastDate;
-                  const urgent = daysLeft !== null && daysLeft <= 7;
-                  const warn = daysLeft !== null && daysLeft <= 14;
-                  const overdue = daysLeft !== null && daysLeft < 0;
-                  // Feita = existe avaliação dentro do ciclo atual (não vencida)
-                  const done = hasAval && !overdue;
-                  const toggleDone = async () => {
-                    if (!done) {
-                      await updateSel(c => ({ ...c, assessments: [{ type, date: today(), professional: c.professional || "", notes: "", id: Date.now().toString() }, ...(c.assessments || [])] }));
-                      return;
-                    }
-                    if (!window.confirm(`Desmarcar a avaliação ${type}? O registro de ${fmtDate(lastDate)} será removido.`)) return;
-                    await updateSel(c => {
-                      const latest = (c.assessments || []).filter(a => a.type === type).sort((a, b) => b.date > a.date ? 1 : -1)[0];
-                      return { ...c, assessments: (c.assessments || []).filter(a => a !== latest) };
-                    });
-                  };
-                  return (
-                    <div key={type} style={{ background: overdue ? "#fff0ee" : urgent ? "#fff8ee" : warn ? "#fffde8" : "#f8f3ea", borderRadius: 10, padding: "12px 14px", border: `1px solid ${overdue ? "#f0a0a0" : urgent ? "#f0c080" : warn ? "#e8d860" : "#e0d8cc"}` }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-                        <span style={{ fontWeight: 700, fontSize: 13, color: navy }}>{type}</span>
-                        <button onClick={() => { setAssessForm({ type, date: today(), professional: sel.professional || "", notes: "" }); setSubModal("assessment"); }}
-                          style={{ background: gold, color: navy, border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
-                          + Registrar
-                        </button>
-                      </div>
-                      {hasAval ? (
-                        <>
-                          <div style={{ fontSize: 12, color: "#555" }}>Última: <b>{fmtDate(lastDate)}</b></div>
-                          <div style={{ fontSize: 12, marginTop: 3, color: overdue ? "#c0392b" : urgent ? "#b05e1a" : warn ? "#7a6000" : "#2d7a4f", fontWeight: 600 }}>
-                            {overdue ? `⚠️ Vencida há ${Math.abs(daysLeft)}d` :
-                              urgent ? `🔶 Vence em ${daysLeft}d` :
-                              warn ? `📅 Vence em ${daysLeft}d` :
-                              `✅ Próxima: ${fmtDate(nextDate)}`}
-                          </div>
-                        </>
-                      ) : (
-                        <div style={{ fontSize: 12, color: "#aaa", fontStyle: "italic" }}>Ainda não realizada</div>
-                      )}
-                      <button onClick={toggleDone}
-                        style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "5px 10px", borderRadius: 8, border: "2px solid", borderColor: done ? "#2d7a4f" : "#c9b89a", background: done ? "#e8f8ee" : "#fffdf8", cursor: "pointer", fontWeight: 700, fontSize: 12, color: done ? "#2d7a4f" : "#888" }}>
-                        {done ? "✅ Feita" : "◻️ Não feita"}
-                      </button>
+              {/* Status do relatório (a cada 3 meses) */}
+              <div style={{ background: overdue ? "#fff0ee" : urgent ? "#fff8ee" : warn ? "#fffde8" : "#f8f3ea", borderRadius: 10, padding: "12px 14px", marginBottom: 16, border: `1px solid ${overdue ? "#f0a0a0" : urgent ? "#f0c080" : warn ? "#e8d860" : "#e0d8cc"}` }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: navy, marginBottom: 4 }}>📄 Relatório de avaliação (a cada {REPORT_MONTHS} meses)</div>
+                {st.lastDate ? (
+                  <>
+                    <div style={{ fontSize: 12, color: "#555" }}>Último relatório: <b>{fmtDate(st.lastDate)}</b></div>
+                    <div style={{ fontSize: 12, marginTop: 3, color: overdue ? "#c0392b" : urgent ? "#b05e1a" : warn ? "#7a6000" : "#2d7a4f", fontWeight: 600 }}>
+                      {overdue ? `⚠️ Vencido há ${Math.abs(st.daysLeft)}d — refazer` :
+                        urgent ? `🔶 Refazer em ${st.daysLeft}d` :
+                        warn ? `📅 Refazer em ${st.daysLeft}d` :
+                        `✅ Próximo: ${fmtDate(st.nextDate)}`}
                     </div>
-                  );
-                })}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 12, color: "#aaa", fontStyle: "italic" }}>Nenhum relatório concluído ainda</div>
+                )}
               </div>
 
-              <SectionTitle>Histórico de avaliações</SectionTitle>
-              {(sel.assessments || []).length === 0 ? (
-                <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "16px 0" }}>Nenhuma avaliação registrada.</div>
-              ) : [...(sel.assessments || [])].sort((a, b) => b.date > a.date ? 1 : -1).map(a => (
-                <div key={a.id} style={{ background: "#f8f3ea", borderRadius: 8, padding: "10px 14px", fontSize: 13, marginBottom: 8, border: "1px solid #e8dfc8" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, alignItems: "center" }}>
-                    <span style={{ fontWeight: 700, color: navy }}>{a.type}</span>
-                    <span style={{ color: "#888", fontSize: 12 }}>{fmtDate(a.date)}</span>
+              {/* Relatório atual */}
+              <SectionTitle action={(!current || reportDone(current)) && (
+                <button onClick={startReport}
+                  style={{ background: gold, color: navy, border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                  + Novo relatório
+                </button>
+              )}>{current && !reportDone(current) ? "Relatório em andamento" : "Relatório atual"}</SectionTitle>
+              {!current ? (
+                <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "16px 0" }}>Clique em "+ Novo relatório" para começar.</div>
+              ) : (
+                <div style={{ background: "#f8f3ea", borderRadius: 10, padding: "12px 14px", marginBottom: 16, border: "1px solid #e8dfc8" }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Inp half label="Data" type="date" value={current.date} onChange={v => updateReport(current.id, r => ({ ...r, date: v }))} />
+                    <Inp half label="Profissional" value={current.professional || ""} onChange={v => updateReport(current.id, r => ({ ...r, professional: v }))} placeholder="Nome do profissional" />
                   </div>
-                  {a.professional && <div style={{ color: "#888", fontSize: 12, marginBottom: 2 }}>👤 {a.professional}</div>}
-                  {a.notes && <div style={{ color: "#555", marginTop: 6, fontSize: 13, borderTop: "1px solid #e0d8cc", paddingTop: 6 }}>{a.notes}</div>}
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#888", margin: "4px 0 6px" }}>AVALIAÇÕES FEITAS</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8, marginBottom: 10 }}>
+                    {AVAL_TYPES.map(type => {
+                      const done = !!current.checks?.[type];
+                      return (
+                        <button key={type} onClick={() => updateReport(current.id, r => ({ ...r, checks: { ...(r.checks || {}), [type]: !done } }))}
+                          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderRadius: 8, border: "2px solid", borderColor: done ? "#2d7a4f" : "#c9b89a", background: done ? "#e8f8ee" : "#fffdf8", cursor: "pointer", fontWeight: 700, fontSize: 12, color: done ? "#2d7a4f" : "#888", textAlign: "left" }}>
+                          {done ? "✅" : "◻️"} {type}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {current.reportUrl ? (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                      <a href={current.reportUrl} target="_blank" rel="noopener"
+                        style={{ flex: 1, padding: "8px 14px", background: navy, color: gold, borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none", textAlign: "center" }}>
+                        Abrir PDF do relatório ↗
+                      </a>
+                      <button onClick={() => { fileInputRef.current?.click(); }}
+                        style={{ padding: "8px 14px", background: "#f0ebe0", color: "#555", border: "1px solid #c9b89a", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>
+                        Substituir
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => { fileInputRef.current?.click(); }} disabled={aiLoading}
+                      style={{ width: "100%", padding: "10px", border: "2px dashed #c9b89a", borderRadius: 8, background: "#fffdf8", cursor: "pointer", color: "#888", fontSize: 12, marginBottom: 10 }}>
+                      {aiLoading ? "⏳ Enviando…" : "📎 Anexar PDF do relatório"}
+                    </button>
+                  )}
+                  <input ref={fileInputRef} type="file" accept=".pdf" style={{ display: "none" }}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleReportUpload(f, current.id); e.target.value = ""; }} />
+                  <TA label="Observações / resultados" value={current.notes || ""} onChange={v => updateReport(current.id, r => ({ ...r, notes: v }))} rows={3} placeholder="Resultados, medidas, progressos…" />
+                  <div style={{ fontSize: 12, fontWeight: 700, color: reportDone(current) ? "#2d7a4f" : "#b05e1a" }}>
+                    {reportDone(current) ? "✅ Relatório concluído" : `⏳ Faltam ${AVAL_TYPES.filter(t => !current.checks?.[t]).length} de ${AVAL_TYPES.length} avaliações`}
+                  </div>
+                </div>
+              )}
+
+              <SectionTitle>Relatórios anteriores</SectionTitle>
+              {reports.length <= 1 ? (
+                <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "16px 0" }}>Nenhum relatório anterior.</div>
+              ) : reports.slice(1).map(r => (
+                <div key={r.id} style={{ background: "#f8f3ea", borderRadius: 8, padding: "10px 14px", fontSize: 13, marginBottom: 8, border: "1px solid #e8dfc8" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, alignItems: "center" }}>
+                    <span style={{ fontWeight: 700, color: navy }}>{fmtDate(r.date)}</span>
+                    {r.reportUrl && <a href={r.reportUrl} target="_blank" rel="noopener" style={{ fontSize: 12, color: navy, fontWeight: 700 }}>PDF ↗</a>}
+                  </div>
+                  <div style={{ color: "#888", fontSize: 12 }}>
+                    {AVAL_TYPES.map(t => `${r.checks?.[t] ? "✅" : "◻️"} ${t}`).join("  ")}
+                  </div>
+                  {r.professional && <div style={{ color: "#888", fontSize: 12, marginTop: 2 }}>👤 {r.professional}</div>}
+                  {r.notes && <div style={{ color: "#555", marginTop: 6, fontSize: 13, borderTop: "1px solid #e0d8cc", paddingTop: 6 }}>{r.notes}</div>}
                 </div>
               ))}
             </div>
-          )}
+            );
+          })()}
 
           {/* TAB AULAS */}
           {detailTab === "aulas" && (
@@ -1048,21 +1084,6 @@ export default function CRM() {
               )}
             </div>
           )}
-        </Modal>
-      )}
-
-      {/* ── SUB-MODAL: Registrar avaliação ── */}
-      {subModal === "assessment" && (
-        <Modal title={`📋 Registrar avaliação — ${assessForm.type}`} onClose={() => setSubModal(null)}>
-          <Inp label="Data da avaliação" value={assessForm.date} onChange={v => setAssessForm(f => ({ ...f, date: v }))} type="date" />
-          <Inp label="Profissional" value={assessForm.professional} onChange={v => setAssessForm(f => ({ ...f, professional: v }))} placeholder="Nome do profissional" />
-          <TA label="Observações / resultados" value={assessForm.notes} onChange={v => setAssessForm(f => ({ ...f, notes: v }))} rows={4} placeholder="Resultados, medidas, progressos…" />
-          <button onClick={async () => {
-            await updateSel(c => ({ ...c, assessments: [{ ...assessForm, id: Date.now().toString() }, ...(c.assessments || [])] }));
-            setSubModal(null);
-          }} style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer", marginTop: 4 }}>
-            Salvar avaliação
-          </button>
         </Modal>
       )}
 
