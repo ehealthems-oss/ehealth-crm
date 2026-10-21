@@ -454,13 +454,14 @@ export default function CRM() {
     const q = search.toLowerCase();
     return (!q || c.name.toLowerCase().includes(q) || (c.phone || "").includes(q)) &&
       (filterStage === "Todos" || c.stage === filterStage);
-  });
+  }).sort((a, b) => (a.name || "").localeCompare(b.name || "", "pt-BR", { sensitivity: "base" }));
 
   // Alertas
   const alerts = clients
     .filter(c => c.stage === "Cliente ativo")
     .map(c => ({ c, bd: nextBirthdayDays(c.birthday), avalAlert: nextAvalAlert(c), risk: calcRisk(c) }))
-    .filter(x => (x.bd !== null && x.bd <= 14) || x.avalAlert !== null || x.risk.level === "Alto");
+    .filter(x => (x.bd !== null && x.bd <= 14) || x.avalAlert !== null || x.risk.level === "Alto")
+    .sort((a, b) => (a.c.name || "").localeCompare(b.c.name || "", "pt-BR", { sensitivity: "base" }));
 
   const stats = {
     total: clients.length,
