@@ -840,6 +840,19 @@ export default function CRM() {
                   const urgent = daysLeft !== null && daysLeft <= 7;
                   const warn = daysLeft !== null && daysLeft <= 14;
                   const overdue = daysLeft !== null && daysLeft < 0;
+                  // Feita = existe avaliação dentro do ciclo atual (não vencida)
+                  const done = hasAval && !overdue;
+                  const toggleDone = async () => {
+                    if (!done) {
+                      await updateSel(c => ({ ...c, assessments: [{ type, date: today(), professional: c.professional || "", notes: "", id: Date.now().toString() }, ...(c.assessments || [])] }));
+                      return;
+                    }
+                    if (!window.confirm(`Desmarcar a avaliação ${type}? O registro de ${fmtDate(lastDate)} será removido.`)) return;
+                    await updateSel(c => {
+                      const latest = (c.assessments || []).filter(a => a.type === type).sort((a, b) => b.date > a.date ? 1 : -1)[0];
+                      return { ...c, assessments: (c.assessments || []).filter(a => a !== latest) };
+                    });
+                  };
                   return (
                     <div key={type} style={{ background: overdue ? "#fff0ee" : urgent ? "#fff8ee" : warn ? "#fffde8" : "#f8f3ea", borderRadius: 10, padding: "12px 14px", border: `1px solid ${overdue ? "#f0a0a0" : urgent ? "#f0c080" : warn ? "#e8d860" : "#e0d8cc"}` }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
@@ -862,6 +875,10 @@ export default function CRM() {
                       ) : (
                         <div style={{ fontSize: 12, color: "#aaa", fontStyle: "italic" }}>Ainda não realizada</div>
                       )}
+                      <button onClick={toggleDone}
+                        style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "5px 10px", borderRadius: 8, border: "2px solid", borderColor: done ? "#2d7a4f" : "#c9b89a", background: done ? "#e8f8ee" : "#fffdf8", cursor: "pointer", fontWeight: 700, fontSize: 12, color: done ? "#2d7a4f" : "#888" }}>
+                        {done ? "✅ Feita" : "◻️ Não feita"}
+                      </button>
                     </div>
                   );
                 })}
