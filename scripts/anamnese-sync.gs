@@ -82,6 +82,8 @@ function testarUltimaResposta(opts) {
 // A lista NÃO fica no repositório (é público): preencha só na cópia colada no Apps Script.
 const CLIENTES_ATIVOS = [];
 const STAGE_ATIVO = "Cliente ativo";
+// Nome da lista → nome como está no formulário/CRM, quando são diferentes
+const APELIDOS = {};
 // Nomes da lista que não correspondem a nenhuma anamnese (entram só com o nome)
 const FORCAR_SEM_ANAMNESE = [];
 
@@ -93,12 +95,13 @@ function previaClientesAtivos() {
 // Passo 2: grava. Pode rodar de novo se parar no meio (quem já foi importado é pulado).
 function importarClientesAtivos() {
   const inicio = Date.now();
+  preencherAnamnesesFaltando();
   const clients = supa("get", "clients?select=id,name,stage,anamnese");
   let feitos = 0;
   for (const p of planoAtivos()) {
     if (Date.now() - inicio > 4.5 * 60 * 1000) { Logger.log("⏸️ Tempo quase esgotado. Clique em Executar de novo para continuar."); return; }
     if (p.status === "ENCONTRADO") {
-      const ja = clients.find(c => c.stage === STAGE_ATIVO && c.anamnese && norm(c.anamnese.submittedAt) === norm(p.named[TIMESTAMP]));
+      const ja = clients.find(c => c.stage === STAGE_ATIVO && c.anamnese && c.anamnese.submittedAt && norm(c.anamnese.submittedAt) === norm(p.named[TIMESTAMP]));
       if (ja) continue;
       syncResposta(p.named, false, STAGE_ATIVO);
       feitos++;
@@ -118,6 +121,29 @@ function importarClientesAtivos() {
   Logger.log("✅ Concluído. Processados nesta rodada: " + feitos);
 }
 
+// Grava a anamnese completa de quem já está no CRM mas chegou com a versão antiga do script (anamnese vazia)
+function preencherAnamnesesFaltando() {
+  const clients = supa("get", "clients?select=id,name,email,anamnese");
+  const vazios = clients.filter(c => !((c.anamnese && c.anamnese.answers) || []).length);
+  if (!vazios.length) return;
+  const sheets = SpreadsheetApp.getActive().getSheets();
+  const sheet = sheets.find(s => s.getFormUrl()) || sheets[0];
+  const rows = sheet.getDataRange().getDisplayValues();
+  const headers = rows[0];
+  const nameCol = headers.findIndex(h => norm(h).startsWith(norm(Q.name)));
+  const emailCol = headers.findIndex(h => norm(h).startsWith(norm(Q.email)));
+  vazios.forEach(c => {
+    // Resposta mais recente do mesmo e-mail; senão, do mesmo nome
+    const r = rows.slice(1).reverse().find(r =>
+      (c.email && emailCol >= 0 && String(r[emailCol]).trim().toLowerCase() === c.email.trim().toLowerCase()) ||
+      norm(r[nameCol]) === norm(c.name));
+    if (!r) return Logger.log("Sem anamnese no formulário: " + c.name);
+    const named = {};
+    headers.forEach((h, i) => { (named[h] = named[h] || []).push(r[i]); });
+    syncResposta(named);
+  });
+}
+
 function planoAtivos() {
   const sheets = SpreadsheetApp.getActive().getSheets();
   const sheet = sheets.find(s => s.getFormUrl()) || sheets[0];
@@ -129,7 +155,8 @@ function planoAtivos() {
   rows.slice(1).forEach(r => { const n = String(r[nameCol] || "").trim(); if (n) porNome[norm(n)] = r; });
   const nomes = Object.keys(porNome);
 
-  return CLIENTES_ATIVOS.map(lista => {
+  return CLIENTES_ATIVOS.map(original => {
+    const lista = APELIDOS[original] || original;
     if (FORCAR_SEM_ANAMNESE.some(n => norm(n) === norm(lista))) return { lista, status: "SEM ANAMNESE", detalhe: "será criado só com o nome" };
     const alvo = norm(lista).split(" ");
     const exato = nomes.filter(n => n === norm(lista));
