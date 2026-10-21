@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabase";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
+// Plano EMS: preenchido por vendas quando o cliente fecha (vazio até lá)
 const EMS_FREQ = ["EMS 1x/semana", "EMS 2x/semana", "EMS 3x/semana"];
+const EMS_TERMS = ["Trimestral", "Semestral", "Anual"];
 const LOCATIONS = ["In Home", "Racquet Club Terral", "Racquet Club Salve Arena"];
 // Apenas 2 categorias visíveis no CRM
 const CLIENT_STAGES = ["Cliente ativo", "Prospecção"];
@@ -25,7 +27,7 @@ const LESSON_STATUS_COLORS = {
 
 const EMPTY_CLIENT = {
   name: "", phone: "", email: "", birthday: "", stage: "Cliente ativo",
-  location: "In Home", emsFreq: "EMS 2x/semana", professional: "", notes: "",
+  location: "In Home", emsFreq: "", professional: "", notes: "",
   anamnese: null, // respostas completas do Google Forms: { submittedAt, answers: [{ q, a }] }
   startDate: "", // data de início para LTV
   reportUrl: "", // PDF do relatório
@@ -661,15 +663,16 @@ export default function CRM() {
             </div>
           </div>
           <div style={{ marginBottom: 13 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Frequência EMS</label>
-            <div style={{ display: "flex", gap: 6 }}>
-              {EMS_FREQ.map(f => (
-                <button key={f} onClick={() => ff("emsFreq")(f)}
-                  style={{ flex: 1, padding: "7px 4px", borderRadius: 8, border: "2px solid", borderColor: form.emsFreq === f ? gold : "#c9b89a", background: form.emsFreq === f ? gold + "22" : "#fffdf8", fontWeight: form.emsFreq === f ? 700 : 400, fontSize: 11, cursor: "pointer", color: form.emsFreq === f ? "#7a5c1e" : "#2a2218" }}>
-                  {f}
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Plano EMS (preenchido por vendas)</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
+              {EMS_FREQ.flatMap(f => EMS_TERMS.map(t => `${f} · ${t}`)).map(p => (
+                <button key={p} onClick={() => ff("emsFreq")(form.emsFreq === p ? "" : p)}
+                  style={{ padding: "7px 4px", borderRadius: 8, border: "2px solid", borderColor: form.emsFreq === p ? gold : "#c9b89a", background: form.emsFreq === p ? gold + "22" : "#fffdf8", fontWeight: form.emsFreq === p ? 700 : 400, fontSize: 11, cursor: "pointer", color: form.emsFreq === p ? "#7a5c1e" : "#2a2218" }}>
+                  {p.replace("EMS ", "")}
                 </button>
               ))}
             </div>
+            <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>{form.emsFreq ? "Clique de novo no plano escolhido para deixar sem plano." : "Sem plano fechado."}</div>
           </div>
           <TA label="Observações gerais" value={form.notes} onChange={ff("notes")} rows={2} />
           <div style={{ display: "flex", gap: 10, marginTop: 10, justifyContent: "flex-end" }}>
