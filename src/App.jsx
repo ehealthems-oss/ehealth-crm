@@ -672,7 +672,7 @@ export default function CRM() {
                 </button>
               ))}
             </div>
-            <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>{form.emsFreq ? "Clique de novo no plano escolhido para deixar sem plano." : "Sem plano fechado."}</div>
+            <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>{form.emsFreq && !form.emsFreq.includes(" · ") ? `⚠️ Plano atual: ${form.emsFreq} (sem duração). Escolha a opção correta acima.` : form.emsFreq ?"Clique de novo no plano escolhido para deixar sem plano." : "Sem plano fechado."}</div>
           </div>
           <TA label="Observações gerais" value={form.notes} onChange={ff("notes")} rows={2} />
           <div style={{ display: "flex", gap: 10, marginTop: 10, justifyContent: "flex-end" }}>
