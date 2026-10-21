@@ -76,7 +76,73 @@ function testarUltimaResposta(opts) {
   syncResposta(named, opts && opts.forcePoints);
 }
 
-function syncResposta(named, forcePoints) {
+// ── Importação dos clientes ativos (respostas antigas) ──
+// Nomes como os clientes são chamados no dia a dia; basta que cada palavra apareça no nome completo do formulário.
+// Para resolver ambiguidade, escreva o nome completo exatamente como está no formulário.
+// A lista NÃO fica no repositório (é público): preencha só na cópia colada no Apps Script.
+const CLIENTES_ATIVOS = [];
+const STAGE_ATIVO = "Cliente ativo";
+
+// Passo 1: só lê e mostra o que seria feito (não grava nada)
+function previaClientesAtivos() {
+  planoAtivos().forEach(p => Logger.log(p.status + " | " + p.lista + (p.detalhe ? " → " + p.detalhe : "")));
+}
+
+// Passo 2: grava. Pode rodar de novo se parar no meio (quem já foi importado é pulado).
+function importarClientesAtivos() {
+  const inicio = Date.now();
+  const clients = supa("get", "clients?select=id,name,stage,anamnese");
+  let feitos = 0;
+  for (const p of planoAtivos()) {
+    if (Date.now() - inicio > 4.5 * 60 * 1000) { Logger.log("⏸️ Tempo quase esgotado. Clique em Executar de novo para continuar."); return; }
+    if (p.status === "ENCONTRADO") {
+      const ja = clients.find(c => c.stage === STAGE_ATIVO && c.anamnese && norm(c.anamnese.submittedAt) === norm(p.named[TIMESTAMP]));
+      if (ja) continue;
+      syncResposta(p.named, false, STAGE_ATIVO);
+      feitos++;
+    } else if (p.status === "SEM ANAMNESE") {
+      const existente = clients.find(c => norm(c.name) === norm(p.lista));
+      if (existente) {
+        if (existente.stage !== STAGE_ATIVO) supa("patch", "clients?id=eq." + encodeURIComponent(existente.id), { stage: STAGE_ATIVO });
+      } else {
+        supa("post", "clients", { name: p.lista.trim(), stage: STAGE_ATIVO });
+        clients.push({ name: p.lista, stage: STAGE_ATIVO });
+      }
+      feitos++;
+    } else {
+      Logger.log("⚠️ Pulado (" + p.status + "): " + p.lista + " → " + p.detalhe);
+    }
+  }
+  Logger.log("✅ Concluído. Processados nesta rodada: " + feitos);
+}
+
+function planoAtivos() {
+  const sheets = SpreadsheetApp.getActive().getSheets();
+  const sheet = sheets.find(s => s.getFormUrl()) || sheets[0];
+  const rows = sheet.getDataRange().getDisplayValues();
+  const headers = rows[0];
+  const nameCol = headers.findIndex(h => norm(h).startsWith(norm(Q.name)));
+  // Uma linha por pessoa: a resposta mais recente
+  const porNome = {};
+  rows.slice(1).forEach(r => { const n = String(r[nameCol] || "").trim(); if (n) porNome[norm(n)] = r; });
+  const nomes = Object.keys(porNome);
+
+  return CLIENTES_ATIVOS.map(lista => {
+    const alvo = norm(lista).split(" ");
+    const exato = nomes.filter(n => n === norm(lista));
+    const achados = exato.length ? exato : nomes.filter(n => alvo.every(w => n.split(" ").includes(w)));
+    if (achados.length === 1) {
+      const r = porNome[achados[0]];
+      const named = {};
+      headers.forEach((h, i) => { (named[h] = named[h] || []).push(r[i]); });
+      return { lista, status: "ENCONTRADO", detalhe: r[nameCol] + " (" + r[headers.indexOf(TIMESTAMP)] + ")", named };
+    }
+    if (achados.length > 1) return { lista, status: "AMBÍGUO", detalhe: achados.map(n => porNome[n][nameCol]).join(" / ") };
+    return { lista, status: "SEM ANAMNESE", detalhe: "será criado só com o nome" };
+  });
+}
+
+function syncResposta(named, forcePoints, stage) {
   const keys = Object.keys(named);
   const valuesOf = match => {
     const vals = [];
@@ -130,6 +196,7 @@ function syncResposta(named, forcePoints) {
 
   if (match) {
     const patch = { anamnese };
+    if (stage && match.stage !== stage) patch.stage = stage;
     Object.keys(fromAnamnese).forEach(k => {
       if (fromAnamnese[k] && !String(match[k] || "").trim()) patch[k] = fromAnamnese[k];
     });
@@ -138,10 +205,10 @@ function syncResposta(named, forcePoints) {
     Logger.log("Atualizado: " + match.id + " | campos: " + Object.keys(patch).join(", ") +
       " | linhas gravadas: " + (saved ? saved.length : 0));
   } else {
-    const novo = { ...fromAnamnese, anamnese, stage: "Prospecção" };
+    const novo = { ...fromAnamnese, anamnese, stage: stage || "Prospecção" };
     Object.keys(novo).forEach(k => { if (novo[k] === "") delete novo[k]; });
     supa("post", "clients", novo);
-    Logger.log("Criado novo cliente (Prospecção).");
+    Logger.log("Criado novo cliente (" + novo.stage + "): " + name);
   }
 }
 
