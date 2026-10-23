@@ -5,7 +5,7 @@ import { supabase } from "./supabase";
 // Plano EMS: preenchido por vendas quando o cliente fecha (vazio até lá)
 const EMS_FREQ = ["EMS 1x/semana", "EMS 2x/semana", "EMS 3x/semana"];
 const EMS_TERMS = ["Trimestral", "Semestral", "Anual"];
-const LOCATIONS = ["In Home", "Racquet Club Terral", "Racquet Club Salve Arena"];
+const LOCATIONS = ["In Home", "Racquet Club Terral"];
 // Fluxo do aluno: Prospecção → Raio-X → Experimental (no studio da Terral) → Ativo ⇄ Pausado → Inativo
 const FUNNEL_STAGES = ["Prospecção", "Raio-X feito", "Experimental feita", "Cliente ativo"];
 const SIDE_STAGES = ["Pausado", "Inativo"];
@@ -66,7 +66,7 @@ const EMPTY_LESSON = {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const locLabel = l =>
   l === "In Home" ? "🏠 In Home" :
-  l === "Racquet Club Terral" ? "🎾 Terral" : "🎾 Salve Arena";
+  l === "Racquet Club Terral" ? "🎾 Terral" : l || "—";
 const fmtDate = d => d
   ? new Date(d + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
 const fmtDateShort = d => d
