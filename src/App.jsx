@@ -6,12 +6,22 @@ import { supabase } from "./supabase";
 const EMS_FREQ = ["EMS 1x/semana", "EMS 2x/semana", "EMS 3x/semana"];
 const EMS_TERMS = ["Trimestral", "Semestral", "Anual"];
 const LOCATIONS = ["In Home", "Racquet Club Terral", "Racquet Club Salve Arena"];
-// Apenas 2 categorias visíveis no CRM
-const CLIENT_STAGES = ["Cliente ativo", "Prospecção"];
+// Fluxo do aluno: Prospecção → Raio-X → Experimental (no studio da Terral) → Ativo ⇄ Pausado → Inativo
+const FUNNEL_STAGES = ["Prospecção", "Raio-X feito", "Experimental feita", "Cliente ativo"];
+const SIDE_STAGES = ["Pausado", "Inativo"];
+const CLIENT_STAGES = [...FUNNEL_STAGES, ...SIDE_STAGES];
 const STAGE_COLORS = {
-  "Cliente ativo": "#2d7a4f",
-  "Prospecção":    "#c9a96e",
+  "Prospecção":         "#c9a96e",
+  "Raio-X feito":       "#8e6fc4",
+  "Experimental feita": "#2f80b8",
+  "Cliente ativo":      "#2d7a4f",
+  "Pausado":            "#7f8c8d",
+  "Inativo":            "#a04040",
 };
+
+// Férias / viagem: c.pauses = [{ id, type, start, returnDate, notes }]
+const PAUSE_TYPES = ["Férias", "Viagem", "Outro"];
+const EMPTY_PAUSE = { type: "Férias", start: "", returnDate: "", notes: "" };
 const gold = "#c9a96e", navy = "#0C1B33", cream = "#F5F0E8";
 
 // 4 tipos fixos de avaliação
@@ -33,11 +43,12 @@ const EMPTY_CLIENT = {
   reportUrl: "", // PDF do relatório
   attentionPoints: "", // pontos de atenção extraídos/editados
   height: "", weight: "", goals: "", // vindos da anamnese
-  assessments: [], lessons: [], touchpoints: [], tasks: [],
+  assessments: [], lessons: [], touchpoints: [], tasks: [], pauses: [],
 };
 
 const EMPTY_LESSON = {
   date: "", status: "Realizada", notes: "",
+  motivo: "",            // obrigatório quando cancelada; opcional quando reagendada
   // Formulário pós-aula
   presenca: null,        // 0-10
   motivacao: null,       // 0-10
@@ -175,6 +186,26 @@ const reportStatus = c => {
 const nextAvalAlert = c => {
   const s = reportStatus(c);
   return s.daysLeft !== null && s.daysLeft <= 14 ? s : null;
+};
+
+// Alerta da gestão: as últimas N aulas registradas foram canceladas ou reagendadas
+const MISSED_IN_ROW = 2;
+const isMissed = l => l.status === "Cancelada" || l.status === "Reagendada";
+const lessonsNewestFirst = c => [...(c.lessons || [])].filter(l => l.date)
+  .sort((a, b) => a.date !== b.date ? (b.date > a.date ? 1 : -1) : (b.id > a.id ? 1 : -1));
+const missedStreak = c => {
+  const ls = lessonsNewestFirst(c);
+  let n = 0;
+  while (n < ls.length && isMissed(ls[n])) n++;
+  return n >= MISSED_IN_ROW ? ls.slice(0, n) : null;
+};
+
+// Pausa em andamento (começou e ainda não chegou a data de retorno; sem retorno = indefinida)
+const activePause = c => (c.pauses || []).find(p => p.start && p.start <= today() && (!p.returnDate || p.returnDate > today())) || null;
+// Etapa que o cliente deveria ter de acordo com as pausas registradas
+const stageFromPauses = c => {
+  if (c.stage !== "Cliente ativo" && c.stage !== "Pausado") return c.stage;
+  return activePause(c) ? "Pausado" : "Cliente ativo";
 };
 
 const lessonStats = c => {
@@ -341,6 +372,21 @@ function SectionTitle({ children, action }) {
   );
 }
 
+const pauseLabel = p => !p ? "—" :
+  `${p.type === "Viagem" ? "✈️" : p.type === "Férias" ? "🏖️" : "⏸️"} ${p.type} · ${p.returnDate ? "volta " + fmtDateShort(p.returnDate) : "sem data de volta"}`;
+
+function MissedBadge({ streak }) {
+  const canceled = streak.filter(l => l.status === "Cancelada").length;
+  const resched = streak.length - canceled;
+  const parts = [canceled && `${canceled} cancel.`, resched && `${resched} reag.`].filter(Boolean).join(" + ");
+  return (
+    <span title={streak.map(l => `${fmtDate(l.date)} ${l.status}: ${l.motivo || "sem motivo"}`).join("\n")}
+      style={{ fontSize: 11, color: "#fff", fontWeight: 700, background: "#c0392b", borderRadius: 10, padding: "2px 8px", whiteSpace: "nowrap" }}>
+      🚨 {streak.length} seguidas ({parts})
+    </span>
+  );
+}
+
 function AlertBadge({ days, label }) {
   if (days === null || days > 30) return null;
   const urgent = days <= 7;
@@ -366,6 +412,7 @@ export default function CRM() {
   const [lessonForm, setLessonForm] = useState({ ...EMPTY_LESSON, date: today() });
   const [touchForm, setTouchForm] = useState({ date: today(), channel: "WhatsApp", direction: "Saída", summary: "" });
   const [taskForm, setTaskForm] = useState({ title: "", dueDate: "", done: false });
+  const [pauseForm, setPauseForm] = useState({ ...EMPTY_PAUSE });
   const [aiLoading, setAiLoading] = useState(false);
   const [editingLesson, setEditingLesson] = useState(null); // id da aula sendo visualizada
   const fileInputRef = useRef(null);
@@ -373,7 +420,16 @@ export default function CRM() {
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("clients").select("*").order("created_at", { ascending: false });
-      if (data) setClients(data.map(normalizeClient));
+      if (data) {
+        // Pausas que começaram ou terminaram desde a última visita mudam a etapa automaticamente
+        const list = await Promise.all(data.map(normalizeClient).map(async c => {
+          const stage = stageFromPauses(c);
+          if (stage === c.stage) return c;
+          const { data: upd } = await supabase.from("clients").update({ stage }).eq("id", c.id).select();
+          return upd ? normalizeClient(upd[0]) : c;
+        }));
+        setClients(list);
+      }
       setLoading(false);
     })();
   }, []);
@@ -384,6 +440,7 @@ export default function CRM() {
     lessons: c.lessons || [],
     touchpoints: c.touchpoints || [],
     tasks: c.tasks || [],
+    pauses: c.pauses || [],
   });
 
   // ── CRUD ──
@@ -416,6 +473,25 @@ export default function CRM() {
     const { data } = await supabase.from("clients").update({ stage }).eq("id", id).select();
     if (data) { const n = normalizeClient(data[0]); setClients(p => p.map(c => c.id === id ? n : c)); if (sel?.id === id) setSel(n); }
   };
+
+  // Botões de etapa: "Pausado" pede o registro de férias/viagem; voltar a "Cliente ativo" encerra a pausa em andamento
+  const changeStage = st => {
+    if (st === "Pausado") { openPauseForm(); return; }
+    if (st === "Cliente ativo" && activePause(sel)) { endPause(activePause(sel).id); return; }
+    mv(sel.id, st);
+  };
+  const openPauseForm = () => { setPauseForm({ ...EMPTY_PAUSE, start: today() }); setSubModal("pause"); };
+  const savePause = async () => {
+    await updateSel(c => {
+      const next = { ...c, pauses: [{ ...pauseForm, id: Date.now().toString() }, ...(c.pauses || [])] };
+      return { ...next, stage: stageFromPauses(next) };
+    });
+    setSubModal(null);
+  };
+  const endPause = id => updateSel(c => {
+    const next = { ...c, pauses: (c.pauses || []).map(p => p.id === id ? { ...p, returnDate: today() } : p) };
+    return { ...next, stage: stageFromPauses(next) };
+  });
 
   const ff = k => v => setForm(f => ({ ...f, [k]: v }));
   const lf = k => v => setLessonForm(f => ({ ...f, [k]: v }));
@@ -459,14 +535,16 @@ export default function CRM() {
   // Alertas
   const alerts = clients
     .filter(c => c.stage === "Cliente ativo")
-    .map(c => ({ c, bd: nextBirthdayDays(c.birthday), avalAlert: nextAvalAlert(c), risk: calcRisk(c) }))
-    .filter(x => (x.bd !== null && x.bd <= 14) || x.avalAlert !== null || x.risk.level === "Alto")
-    .sort((a, b) => (a.c.name || "").localeCompare(b.c.name || "", "pt-BR", { sensitivity: "base" }));
+    .map(c => ({ c, bd: nextBirthdayDays(c.birthday), avalAlert: nextAvalAlert(c), risk: calcRisk(c), missed: missedStreak(c) }))
+    .filter(x => (x.bd !== null && x.bd <= 14) || x.avalAlert !== null || x.risk.level === "Alto" || x.missed)
+    .sort((a, b) => (!!b.missed - !!a.missed) || (a.c.name || "").localeCompare(b.c.name || "", "pt-BR", { sensitivity: "base" }));
+
+  const paused = clients.filter(c => c.stage === "Pausado")
+    .map(c => ({ c, p: activePause(c) }))
+    .sort((a, b) => (a.p?.returnDate || "9999") > (b.p?.returnDate || "9999") ? 1 : -1);
 
   const stats = {
     total: clients.length,
-    active: clients.filter(c => c.stage === "Cliente ativo").length,
-    prospects: clients.filter(c => c.stage === "Prospecção").length,
     highRisk: clients.filter(c => c.stage === "Cliente ativo" && calcRisk(c).level === "Alto").length,
     bdMonth: clients.filter(c => { const d = nextBirthdayDays(c.birthday); return d !== null && d <= 30; }).length,
   };
@@ -504,10 +582,19 @@ export default function CRM() {
       {/* ── DASHBOARD ── */}
       {view === "dashboard" && (
         <div style={{ padding: 20, maxWidth: 900, margin: "0 auto" }}>
+          {/* Fluxo: quantos alunos em cada etapa (clique abre a lista filtrada) */}
+          <div style={{ fontWeight: 700, marginBottom: 8, color: navy }}>🧭 Onde cada aluno está</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 10, marginBottom: 10 }}>
+            {CLIENT_STAGES.map((st, i) => (
+              <div key={st} onClick={() => { setFilterStage(st); setView("list"); }}
+                style={{ background: "#fff", borderRadius: 10, padding: "12px 14px", borderLeft: `3px solid ${STAGE_COLORS[st]}`, boxShadow: "0 1px 4px #0001", cursor: "pointer" }}>
+                <div style={{ fontSize: 26, fontWeight: 700, color: STAGE_COLORS[st] }}>{clients.filter(c => c.stage === st).length}</div>
+                <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{i < FUNNEL_STAGES.length ? `${i + 1}. ` : ""}{st}</div>
+              </div>
+            ))}
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 10, marginBottom: 16 }}>
             {[
-              { l: "Ativas", v: stats.active, c: "#2d7a4f" },
-              { l: "Prospecção", v: stats.prospects, c: gold },
               { l: "🌡️ Alto risco", v: stats.highRisk, c: "#c0392b" },
               { l: "Total", v: stats.total, c: navy },
               { l: "🎂 /30d", v: stats.bdMonth, c: "#e67e22" },
@@ -522,15 +609,29 @@ export default function CRM() {
           {alerts.length > 0 && (
             <div style={{ background: "#fff", borderRadius: 10, padding: 16, marginBottom: 14, boxShadow: "0 1px 4px #0001", borderTop: "3px solid #e74c3c" }}>
               <div style={{ fontWeight: 700, marginBottom: 10, color: navy }}>🔔 Alertas</div>
-              {alerts.map(({ c, bd, avalAlert, risk }) => (
-                <div key={c.id} onClick={() => { setSel(c); setDetailTab("geral"); setModal("detail"); }}
+              {alerts.map(({ c, bd, avalAlert, risk, missed }) => (
+                <div key={c.id} onClick={() => { setSel(c); setDetailTab(missed ? "aulas" : "geral"); setModal("detail"); }}
                   style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, background: "#f8f3ea", marginBottom: 5, cursor: "pointer", border: "1px solid #e8dfc8" }}>
                   <span style={{ flex: 1, fontWeight: 600, fontSize: 13, color: navy }}>{c.name}</span>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    {missed && <MissedBadge streak={missed} />}
                     {bd !== null && bd <= 14 && <AlertBadge days={bd} label="🎂" />}
                     {avalAlert && <AlertBadge days={avalAlert.daysLeft} label="📄 Relatório" />}
                     {risk.level === "Alto" && <span style={{ fontSize: 11, color: "#c0392b", fontWeight: 700, background: "#ffeaea", border: "1px solid #f5c6c6", borderRadius: 10, padding: "2px 8px" }}>🌡️ Alto risco</span>}
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {paused.length > 0 && (
+            <div style={{ background: "#fff", borderRadius: 10, padding: 16, marginBottom: 14, boxShadow: "0 1px 4px #0001", borderTop: `3px solid ${STAGE_COLORS["Pausado"]}` }}>
+              <div style={{ fontWeight: 700, marginBottom: 10, color: navy }}>✈️ Férias e viagens</div>
+              {paused.map(({ c, p }) => (
+                <div key={c.id} onClick={() => { setSel(c); setDetailTab("geral"); setModal("detail"); }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 8, background: "#f8f3ea", marginBottom: 4, cursor: "pointer" }}>
+                  <span style={{ flex: 1, fontWeight: 600, fontSize: 13, color: navy }}>{c.name}</span>
+                  <span style={{ fontSize: 12, color: "#555" }}>{pauseLabel(p)}</span>
                 </div>
               ))}
             </div>
@@ -628,6 +729,8 @@ export default function CRM() {
                   {aa && <span style={{ fontSize: 11, color: "#c0392b", fontWeight: 600 }}>📄{aa.daysLeft < 0 ? "vencido" : aa.daysLeft + "d"}</span>}
                   {(c.lessons || []).length >= 2 && <span style={{ fontSize: 11, color, fontWeight: 700 }}>🌡️{level}</span>}
                   {isIncomplete(c) && <span style={INCOMPLETE_STYLE}>⚠️ Incompleto</span>}
+                  {c.stage === "Cliente ativo" && missedStreak(c) && <MissedBadge streak={missedStreak(c)} />}
+                  {c.stage === "Pausado" && <span style={{ fontSize: 11, color: "#555" }}>{pauseLabel(activePause(c))}</span>}
                   <Badge stage={c.stage} />
                 </div>
               </div>
@@ -656,7 +759,8 @@ export default function CRM() {
             <Inp label="Peso" value={form.weight} onChange={ff("weight")} placeholder="Ex: 60 kg" half />
           </div>
           <TA label="Objetivos" value={form.goals} onChange={ff("goals")} rows={2} />
-          <Sel label="Status" value={form.stage} onChange={ff("stage")} options={CLIENT_STAGES} />
+          {/* "Pausado" só entra pelo registro de férias/viagem, na ficha do cliente */}
+          <Sel label="Etapa" value={form.stage} onChange={ff("stage")} options={CLIENT_STAGES.filter(s => s !== "Pausado" || form.stage === "Pausado")} />
           <div style={{ marginBottom: 13 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Local</label>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -705,22 +809,32 @@ export default function CRM() {
             {isIncomplete(sel) && <span style={INCOMPLETE_STYLE}>⚠️ Cadastro incompleto: sem anamnese</span>}
             {nextBirthdayDays(sel.birthday) !== null && nextBirthdayDays(sel.birthday) <= 14 && <AlertBadge days={nextBirthdayDays(sel.birthday)} label="🎂" />}
             {nextAvalAlert(sel) && <AlertBadge days={nextAvalAlert(sel).daysLeft} label="📄 Relatório" />}
+            {missedStreak(sel) && <MissedBadge streak={missedStreak(sel)} />}
           </div>
 
           {/* Termômetro */}
           <RiskThermometer client={sel} />
 
-          {/* Mover status */}
+          {/* Etapa no fluxo */}
           <div style={{ margin: "0 0 14px", background: "#f8f3ea", borderRadius: 8, padding: "10px 12px" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 6 }}>STATUS</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {CLIENT_STAGES.map(st => (
-                <button key={st} onClick={() => mv(sel.id, st)}
-                  style={{ flex: 1, padding: "6px 10px", borderRadius: 20, border: "1px solid", borderColor: sel.stage === st ? STAGE_COLORS[st] : "#ddd", background: sel.stage === st ? STAGE_COLORS[st] + "22" : "#fff", color: sel.stage === st ? STAGE_COLORS[st] : "#888", fontSize: 12, cursor: "pointer", fontWeight: sel.stage === st ? 700 : 400 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 6 }}>ETAPA</div>
+            {(() => {
+              const btn = st => (
+                <button key={st} onClick={() => changeStage(st)}
+                  style={{ flex: 1, minWidth: 90, padding: "6px 10px", borderRadius: 20, border: "1px solid", borderColor: sel.stage === st ? STAGE_COLORS[st] : "#ddd", background: sel.stage === st ? STAGE_COLORS[st] + "22" : "#fff", color: sel.stage === st ? STAGE_COLORS[st] : "#888", fontSize: 12, cursor: "pointer", fontWeight: sel.stage === st ? 700 : 400 }}>
                   {st}
                 </button>
-              ))}
-            </div>
+              );
+              return (
+                <>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                    {FUNNEL_STAGES.flatMap((st, i) => i ? [<span key={st + "→"} style={{ color: "#c9b89a" }}>→</span>, btn(st)] : [btn(st)])}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>{SIDE_STAGES.map(btn)}</div>
+                </>
+              );
+            })()}
+            <div style={{ fontSize: 11, color: "#aaa", marginTop: 6 }}>Raio-X e aula experimental acontecem no studio da Terral. "Pausado" registra férias ou viagem.</div>
           </div>
 
           <Tabs active={detailTab} onChange={setDetailTab} tabs={[
@@ -771,6 +885,39 @@ export default function CRM() {
                   {sel.notes}
                 </div>
               )}
+
+              {/* Férias / viagens */}
+              <div style={{ background: "#f4f6f6", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #d5dbdb" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: (sel.pauses || []).length ? 8 : 0 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: navy }}>✈️ Férias e viagens</span>
+                  <button onClick={openPauseForm}
+                    style={{ background: gold, color: navy, border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                    + Registrar
+                  </button>
+                </div>
+                {[...(sel.pauses || [])].sort((a, b) => b.start > a.start ? 1 : -1).map(p => {
+                  const now = activePause(sel)?.id === p.id;
+                  const future = p.start > today();
+                  return (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid #e0e4e4", fontSize: 12 }}>
+                      <div style={{ flex: 1 }}>
+                        <b style={{ color: navy }}>{p.type}</b> · {fmtDate(p.start)} → {p.returnDate ? fmtDate(p.returnDate) : "sem data de volta"}
+                        {now && <span style={{ marginLeft: 6, color: STAGE_COLORS["Pausado"], fontWeight: 700 }}>em andamento</span>}
+                        {future && <span style={{ marginLeft: 6, color: "#2f80b8", fontWeight: 700 }}>agendada</span>}
+                        {p.notes && <div style={{ color: "#777", marginTop: 2 }}>{p.notes}</div>}
+                      </div>
+                      {now && (
+                        <button onClick={() => endPause(p.id)}
+                          style={{ background: "#fff", border: "1px solid #2d7a4f", color: "#2d7a4f", borderRadius: 6, padding: "3px 8px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                          Voltou hoje
+                        </button>
+                      )}
+                      <button onClick={() => updateSel(c => { const next = { ...c, pauses: (c.pauses || []).filter(x => x.id !== p.id) }; return { ...next, stage: stageFromPauses(next) }; })}
+                        style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
               {/* Resumo aulas mês */}
               {(() => { const s = lessonStats(sel); if (!s.total) return null; return (
                 <div style={{ background: "#f0f9f0", borderRadius: 8, padding: "10px 14px", fontSize: 13, marginBottom: 12, display: "flex", gap: 16, flexWrap: "wrap", border: "1px solid #c0e4c0" }}>
@@ -988,6 +1135,7 @@ export default function CRM() {
                         <span style={{ fontWeight: 600, color: navy, fontSize: 13 }}>{fmtDate(l.date)}</span>
                         <span style={{ marginLeft: 8, fontSize: 11, color: sc.text, fontWeight: 600, background: sc.bg, border: "1px solid " + sc.border, borderRadius: 10, padding: "1px 8px" }}>{l.status}</span>
                         {l.presenca !== null && l.presenca !== undefined && <span style={{ marginLeft: 8, fontSize: 11, color: "#888" }}>👤{l.presenca} | 💪{l.motivacao ?? "—"}</span>}
+                        {isMissed(l) && <div style={{ fontSize: 12, color: l.motivo ? "#555" : "#c0392b", marginTop: 2 }}>Motivo: {l.motivo || "não informado"}</div>}
                       </div>
                       <span style={{ color: "#aaa", fontSize: 14 }}>{isOpen ? "▲" : "▼"}</span>
                     </div>
@@ -1120,6 +1268,18 @@ export default function CRM() {
             </div>
           </div>
 
+          {/* Motivo — obrigatório no cancelamento */}
+          {isMissed(lessonForm) && (
+            <TA label={lessonForm.status === "Cancelada" ? "Motivo do cancelamento *" : "Motivo do reagendamento"}
+              value={lessonForm.motivo} onChange={lf("motivo")} rows={2}
+              placeholder="Ex: aluno doente, compromisso de trabalho, viagem, cancelou em cima da hora sem justificar…" />
+          )}
+          {missedStreak({ lessons: [...(sel?.lessons || []), { ...lessonForm, id: "novo" }] }) && isMissed(lessonForm) && (
+            <div style={{ fontSize: 12, color: "#c0392b", background: "#ffeaea", border: "1px solid #f5c6c6", borderRadius: 8, padding: "8px 10px", marginBottom: 13 }}>
+              🚨 Esta será mais uma aula cancelada/reagendada em sequência. A gestão vai receber um alerta no Painel.
+            </div>
+          )}
+
           {/* Formulário pós-aula — só quando realizada */}
           {lessonForm.status === "Realizada" && (
             <div style={{ background: "#f8f3ea", borderRadius: 10, padding: "16px", marginBottom: 16, border: "1px solid #e8dfc8" }}>
@@ -1153,12 +1313,17 @@ export default function CRM() {
           {/* Observação geral (sempre visível) */}
           <TA label="📝 Alguma observação geral?" value={lessonForm.observacaoGeral} onChange={lf("observacaoGeral")} rows={3} placeholder="Observações gerais sobre a aula, o cliente, próximos passos…" />
 
-          <button onClick={async () => {
-            await updateSel(c => ({ ...c, lessons: [{ ...lessonForm, id: Date.now().toString() }, ...(c.lessons || [])] }));
-            setSubModal(null);
-          }} style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer", marginTop: 4 }}>
-            Salvar aula
-          </button>
+          {(() => {
+            const needsReason = lessonForm.status === "Cancelada" && !(lessonForm.motivo || "").trim();
+            return (
+              <button disabled={needsReason} onClick={async () => {
+                await updateSel(c => ({ ...c, lessons: [{ ...lessonForm, motivo: isMissed(lessonForm) ? lessonForm.motivo : "", id: Date.now().toString() }, ...(c.lessons || [])] }));
+                setSubModal(null);
+              }} style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: needsReason ? "default" : "pointer", marginTop: 4, opacity: needsReason ? .5 : 1 }}>
+                {needsReason ? "Descreva o motivo do cancelamento para salvar" : "Salvar aula"}
+              </button>
+            );
+          })()}
         </Modal>
       )}
 
@@ -1193,6 +1358,30 @@ export default function CRM() {
           }} disabled={!taskForm.title} style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer", marginTop: 4, opacity: taskForm.title ? 1 : .5 }}>
             Salvar tarefa
           </button>
+        </Modal>
+      )}
+
+      {/* ── SUB-MODAL: Férias / viagem ── */}
+      {subModal === "pause" && (
+        <Modal title="✈️ Registrar férias / viagem" onClose={() => setSubModal(null)}>
+          <YesNo label="Tipo" value={pauseForm.type} onChange={v => setPauseForm(f => ({ ...f, type: v || f.type }))} options={PAUSE_TYPES} />
+          <div style={{ display: "flex", gap: 10 }}>
+            <Inp label="Saída *" value={pauseForm.start} onChange={v => setPauseForm(f => ({ ...f, start: v }))} type="date" half />
+            <Inp label="Volta prevista" value={pauseForm.returnDate} onChange={v => setPauseForm(f => ({ ...f, returnDate: v }))} type="date" half />
+          </div>
+          <TA label="Observação" value={pauseForm.notes} onChange={v => setPauseForm(f => ({ ...f, notes: v }))} rows={2} placeholder="Ex: viagem a trabalho, vai mandar mensagem quando voltar…" />
+          <div style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
+            Durante o período o aluno fica como "Pausado" e volta sozinho para "Cliente ativo" na data de volta. Sem data de volta, fica pausado até alguém clicar em "Voltou hoje".
+          </div>
+          {(() => {
+            const invalid = !pauseForm.start || (pauseForm.returnDate && pauseForm.returnDate <= pauseForm.start);
+            return (
+              <button onClick={savePause} disabled={invalid}
+                style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer", marginTop: 4, opacity: invalid ? .5 : 1 }}>
+                {pauseForm.returnDate && pauseForm.returnDate <= pauseForm.start ? "A volta precisa ser depois da saída" : "Salvar"}
+              </button>
+            );
+          })()}
         </Modal>
       )}
     </div>
