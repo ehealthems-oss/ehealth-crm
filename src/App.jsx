@@ -57,8 +57,10 @@ const EMPTY_LESSON = {
   dormiu: "",            // Sim / Não / Parcialmente
   descansado: "",        // Sim / Não / Parcialmente
   dor: null,             // 0-10 (null = sem dor)
+  dorDescricao: "",      // o que sentiu e o que foi feito
   alimentacao: "",       // texto livre
-  musculosTrabalhados: "",
+  musculosTrabalhados: "", // legado: aulas antigas
+  treino: "",            // treino da periodização
   adaptacoes: "",
   observacaoGeral: "",
 };
@@ -1158,9 +1160,11 @@ export default function CRM() {
                           {l.dormiu && <div>😴 Dormiu bem: <b>{l.dormiu}</b></div>}
                           {l.descansado && <div>⚡ Descansado: <b>{l.descansado}</b></div>}
                           {l.dor !== null && l.dor !== undefined && <div>🤕 Dor/desconforto: <b>{l.dor}/10</b></div>}
+                          {l.dorDescricao && <div style={{ gridColumn: "1/-1" }}>🤕 O que sentiu: {l.dorDescricao}</div>}
                           {l.alimentacao && <div style={{ gridColumn: "1/-1" }}>🍎 Alimentação: {l.alimentacao}</div>}
+                          {l.treino && <div style={{ gridColumn: "1/-1", whiteSpace: "pre-wrap" }}>🏋️ Treino: {l.treino}</div>}
                           {l.musculosTrabalhados && <div style={{ gridColumn: "1/-1" }}>💪 Músculos: {l.musculosTrabalhados}</div>}
-                          {l.adaptacoes && <div style={{ gridColumn: "1/-1" }}>🔧 Adaptações: {l.adaptacoes}</div>}
+                          {l.adaptacoes && <div style={{ gridColumn: "1/-1" }}>🔧 Mudanças no treino: {l.adaptacoes}</div>}
                           {l.riscoRetencao && <div style={{ gridColumn: "1/-1", color: "#c0392b", fontWeight: 600 }}>⚠️ Risco: {l.riscoRetencao}</div>}
                           {l.observacaoGeral && <div style={{ gridColumn: "1/-1", marginTop: 4, padding: "6px 8px", background: "#f8f3ea", borderRadius: 6 }}>📝 {l.observacaoGeral}</div>}
                         </div>
@@ -1296,12 +1300,15 @@ export default function CRM() {
 
               <div style={{ borderTop: "1px solid #e0d8cc", paddingTop: 14, marginTop: 4 }}>
                 <ScoreSlider label="Teve alguma dor/desconforto durante a sessão? (0 = nenhuma)" value={lessonForm.dor} onChange={lf("dor")} hint="0 = sem dor, 10 = dor intensa" />
+                {lessonForm.dor > 0 && (
+                  <TA label="O que o cliente sentiu? Onde foi a dor e o que foi feito?" value={lessonForm.dorDescricao} onChange={lf("dorDescricao")} rows={2} placeholder="Ex: dor no joelho direito no agachamento, trocamos por leg press…" />
+                )}
                 <TA label="Como está a alimentação e hidratação no dia da sessão?" value={lessonForm.alimentacao} onChange={lf("alimentacao")} rows={2} placeholder="Descreveu, não se alimentou, estava desidratado…" />
               </div>
 
               <div style={{ borderTop: "1px solid #e0d8cc", paddingTop: 14, marginTop: 4 }}>
-                <TA label="Quais foram os principais músculos trabalhados?" value={lessonForm.musculosTrabalhados} onChange={lf("musculosTrabalhados")} rows={2} placeholder="Ex: glúteos, isquiotibiais, core…" />
-                <TA label="Teve alguma adaptação no treino? Qual?" value={lessonForm.adaptacoes} onChange={lf("adaptacoes")} rows={2} placeholder="Ex: reduziu carga no quadril por dor, trabalhou mobilidade…" />
+                <TA label="Qual foi o treino da aula (periodização)?" value={lessonForm.treino} onChange={lf("treino")} rows={4} placeholder="Ex: Treino A – inferiores: agachamento 3x12, stiff 3x10, prancha 3x40s…" />
+                <TA label="Teve alguma mudança no treino? Qual?" value={lessonForm.adaptacoes} onChange={lf("adaptacoes")} rows={2} placeholder="Ex: reduziu carga no quadril por dor, trabalhou mobilidade…" />
               </div>
 
               <div style={{ borderTop: "1px solid #e0d8cc", paddingTop: 14, marginTop: 4 }}>
