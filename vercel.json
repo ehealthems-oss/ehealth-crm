@@ -1,0 +1,5 @@
+{
+  "functions": {
+    "api/comercial.js": { "maxDuration": 120 }
+  }
+}

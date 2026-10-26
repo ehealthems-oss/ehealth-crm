@@ -22,6 +22,10 @@ const STAGE_COLORS = {
 // Férias / viagem: c.pauses = [{ id, type, start, returnDate, notes }]
 const PAUSE_TYPES = ["Férias", "Viagem", "Outro"];
 const EMPTY_PAUSE = { type: "Férias", start: "", returnDate: "", notes: "" };
+// Comercial: c.commercial = { experimental: {...}, resultado, motivo, notes, analysis: {...gerada pela IA em api/comercial.js} }
+const EMPTY_EXPERIMENTAL = { date: "", gostou: null, interesse: null, reacao: "", falas: "", dor: "", objecoes: "", obs: "" };
+const DEAL_STATUS = ["Em negociação", "Fechou", "Não fechou"];
+
 // Periodização: c.workouts = [{ id, name, start, exercises, active }]
 const EMPTY_WORKOUT = { name: "", start: "", exercises: "", active: true };
 
@@ -46,7 +50,7 @@ const EMPTY_CLIENT = {
   reportUrl: "", // PDF do relatório
   attentionPoints: "", // pontos de atenção extraídos/editados
   height: "", weight: "", goals: "", // vindos da anamnese
-  assessments: [], lessons: [], touchpoints: [], tasks: [], pauses: [], workouts: [],
+  assessments: [], lessons: [], touchpoints: [], tasks: [], pauses: [], workouts: [], commercial: {},
 };
 
 const EMPTY_LESSON = {
@@ -284,6 +288,102 @@ const LESSON_POINT_STYLE = {
   info:  { icon: "ℹ️", color: "#888" },
 };
 
+// Exibe a análise SPIN gerada pela IA (aba Comercial)
+const TEMP_COLORS = { Quente: "#c0392b", Morno: "#b05e1a", Frio: "#2f80b8" };
+const SPIN_BLOCKS = [
+  ["situacao", "S", "Situação", "#2f80b8", [["sabemos", "O que já sabemos"], ["perguntas", "Perguntas para completar"]]],
+  ["problema", "P", "Problema", "#b05e1a", [["dores", "Dores identificadas"], ["perguntas", "Perguntas"]]],
+  ["implicacao", "I", "Implicação", "#c0392b", [["perguntas", "Perguntas"]]],
+  ["necessidade", "N", "Necessidade de solução", "#2d7a4f", [["perguntas", "Perguntas"]]],
+];
+
+function CopyBtn({ text }) {
+  const [ok, setOk] = useState(false);
+  return (
+    <button onClick={() => { navigator.clipboard?.writeText(text); setOk(true); setTimeout(() => setOk(false), 1500); }}
+      style={{ background: "none", border: "1px solid #c9b89a", borderRadius: 6, padding: "2px 10px", fontSize: 11, cursor: "pointer", color: ok ? "#2d7a4f" : "#888" }}>
+      {ok ? "✓ Copiado" : "Copiar"}
+    </button>
+  );
+}
+
+function SpinAnalysis({ a, phone }) {
+  const box = { background: "#fff", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #e8dfc8" };
+  const h = { fontWeight: 700, fontSize: 13, color: navy, marginBottom: 6 };
+  const ul = { margin: 0, paddingLeft: 18, fontSize: 13, color: "#444", lineHeight: 1.55 };
+  const items = xs => <ul style={ul}>{(xs || []).map((x, i) => <li key={i}>{x}</li>)}</ul>;
+  const wa = (phone || "").replace(/\D/g, "");
+  return (
+    <div>
+      <div style={{ ...box, background: "#f8f3ea" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <span style={{ ...h, marginBottom: 0, flex: 1 }}>🧭 Resumo</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: TEMP_COLORS[a.temperatura] || "#888", border: "1px solid", borderRadius: 10, padding: "1px 8px" }}>{a.temperatura}</span>
+        </div>
+        <div style={{ fontSize: 13, color: "#444", lineHeight: 1.55 }}>{a.resumo}</div>
+        {a.temperaturaMotivo && <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>{a.temperaturaMotivo}</div>}
+      </div>
+
+      <div style={box}><div style={h}>📌 Pontos mais relevantes</div>{items(a.pontosRelevantes)}</div>
+
+      {SPIN_BLOCKS.map(([k, letter, title, color, parts]) => (
+        <div key={k} style={{ ...box, borderLeft: `4px solid ${color}` }}>
+          <div style={{ ...h, color }}><span style={{ display: "inline-block", width: 20, height: 20, borderRadius: "50%", background: color, color: "#fff", textAlign: "center", lineHeight: "20px", fontSize: 11, marginRight: 6 }}>{letter}</span>{title}</div>
+          {parts.map(([pk, label]) => (a[k]?.[pk] || []).length ? (
+            <div key={pk} style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", margin: "4px 0 2px" }}>{label}</div>
+              {items(a[k][pk])}
+            </div>
+          ) : null)}
+        </div>
+      ))}
+
+      {(a.argumentos || []).length > 0 && (
+        <div style={box}><div style={h}>💡 Argumentos que mais pegam</div>
+          {a.argumentos.map((x, i) => <div key={i} style={{ fontSize: 13, color: "#444", marginBottom: 5 }}><b>{x.argumento}:</b> {x.porque}</div>)}
+        </div>
+      )}
+
+      {(a.objecoes || []).length > 0 && (
+        <div style={box}><div style={h}>🛡️ Objeções prováveis</div>
+          {a.objecoes.map((x, i) => (
+            <div key={i} style={{ fontSize: 13, marginBottom: 8 }}>
+              <div style={{ color: navy, fontWeight: 600 }}>“{x.objecao}”</div>
+              <div style={{ color: "#555" }}>→ {x.resposta}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={box}>
+        <div style={h}>🎯 Plano sugerido e próximo passo</div>
+        <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}><b>{a.planoSugerido?.plano}</b>{a.planoSugerido?.porque ? ` — ${a.planoSugerido.porque}` : ""}</div>
+        <div style={{ fontSize: 13, color: "#444" }}>➡️ {a.proximoPasso}</div>
+      </div>
+
+      {(a.followups || []).length > 0 && (
+        <div style={box}><div style={h}>📲 Follow-ups</div>
+          {a.followups.map((f, i) => (
+            <div key={i} style={{ background: "#f8f3ea", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ flex: 1, fontSize: 11, fontWeight: 700, color: "#7a5c1e" }}>{f.quando} · {f.objetivo}</span>
+                <CopyBtn text={f.mensagem} />
+                {wa && <a href={`https://wa.me/55${wa}?text=${encodeURIComponent(f.mensagem)}`} target="_blank" rel="noopener"
+                  style={{ border: "1px solid #2d7a4f", borderRadius: 6, padding: "2px 10px", fontSize: 11, color: "#2d7a4f", textDecoration: "none" }}>WhatsApp</a>}
+              </div>
+              <div style={{ fontSize: 13, color: "#333", whiteSpace: "pre-wrap" }}>{f.mensagem}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(a.cuidados || []).length > 0 && (
+        <div style={{ ...box, background: "#ffeaea", border: "1px solid #f5c6c6" }}><div style={{ ...h, color: "#c0392b" }}>🚫 Cuidados com este cliente</div>{items(a.cuidados)}</div>
+      )}
+    </div>
+  );
+}
+
 function LessonAttention({ client }) {
   const pts = lessonAttentionPoints(client);
   if (!pts.length) return null;
@@ -504,6 +604,10 @@ export default function CRM() {
   const [lessonForm, setLessonForm] = useState({ ...EMPTY_LESSON, date: today() });
   const [pauseForm, setPauseForm] = useState({ ...EMPTY_PAUSE });
   const [workoutForm, setWorkoutForm] = useState({ ...EMPTY_WORKOUT });
+  const [expForm, setExpForm] = useState({ ...EMPTY_EXPERIMENTAL });
+  const [dealForm, setDealForm] = useState({ resultado: "", motivo: "", notes: "" });
+  const [spinLoading, setSpinLoading] = useState(false);
+  const [spinError, setSpinError] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [editingLesson, setEditingLesson] = useState(null); // id da aula sendo visualizada
   const fileInputRef = useRef(null);
@@ -533,6 +637,7 @@ export default function CRM() {
     tasks: c.tasks || [],
     pauses: c.pauses || [],
     workouts: c.workouts || [],
+    commercial: c.commercial || {},
   });
 
   // ── CRUD ──
@@ -559,6 +664,18 @@ export default function CRM() {
     const updated = updater(sel);
     const { data } = await supabase.from("clients").update(updated).eq("id", sel.id).select();
     if (data) { const n = normalizeClient(data[0]); setClients(p => p.map(c => c.id === sel.id ? n : c)); setSel(n); }
+  };
+
+  const generateSpin = async () => {
+    setSpinLoading(true); setSpinError("");
+    try {
+      const r = await fetch("/api/comercial", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: sel.id }) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Erro ao gerar a análise.");
+      const n = normalizeClient(body.client);
+      setClients(p => p.map(c => c.id === n.id ? n : c)); setSel(n);
+    } catch (e) { setSpinError(e.message); }
+    setSpinLoading(false);
   };
 
   const mv = async (id, stage) => {
@@ -932,6 +1049,7 @@ export default function CRM() {
           <Tabs active={detailTab} onChange={setDetailTab} tabs={[
             { id: "geral", label: "Geral" },
             { id: "anamnese", label: "Anamnese / Relatório" },
+            { id: "comercial", label: "Comercial" },
             { id: "avaliacoes", label: "Avaliações" },
             { id: "periodizacao", label: `Periodização (${(sel.workouts || []).filter(w => w.active).length})` },
             { id: "aulas", label: `Aulas (${(sel.lessons || []).length})` },
@@ -1081,6 +1199,61 @@ export default function CRM() {
               </div>
             </div>
           )}
+
+          {/* TAB COMERCIAL */}
+          {detailTab === "comercial" && (() => {
+            const com = sel.commercial || {};
+            const exp = com.experimental || {};
+            const hasExp = Object.values(exp).some(v => v !== "" && v !== null && v !== undefined);
+            const a = com.analysis;
+            const card = { background: "#fff", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #e8dfc8" };
+            const smallBtn = { background: gold, color: navy, border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" };
+            return (
+            <div>
+              {/* Aula experimental */}
+              <div style={card}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: hasExp ? 8 : 0 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: navy }}>🧪 Aula experimental</span>
+                  <button onClick={() => { setExpForm({ ...EMPTY_EXPERIMENTAL, date: today(), ...exp }); setSubModal("experimental"); }} style={smallBtn}>{hasExp ? "Editar" : "+ Registrar"}</button>
+                </div>
+                {hasExp ? (
+                  <div style={{ fontSize: 12, color: "#555", display: "grid", gap: 3 }}>
+                    <div>{exp.date ? fmtDate(exp.date) : ""}{hasNum(exp.gostou) ? ` · Gostou: ${exp.gostou}/10` : ""}{hasNum(exp.interesse) ? ` · Interesse em fechar: ${exp.interesse}/10` : ""}</div>
+                    {exp.reacao && <div>👀 {exp.reacao}</div>}
+                    {exp.falas && <div>💬 “{exp.falas}”</div>}
+                    {exp.dor && <div>🤕 {exp.dor}</div>}
+                    {exp.objecoes && <div>❓ {exp.objecoes}</div>}
+                    {exp.obs && <div>📝 {exp.obs}</div>}
+                  </div>
+                ) : <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>Registre como foi a experimental. Quanto mais detalhes (principalmente o que o cliente falou), melhor fica a análise.</div>}
+              </div>
+
+              {/* Negociação */}
+              <div style={card}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: com.resultado || com.notes ? 8 : 0 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: navy }}>🤝 Negociação{com.resultado ? ` · ${com.resultado}` : ""}</span>
+                  <button onClick={() => { setDealForm({ resultado: com.resultado || "", motivo: com.motivo || "", notes: com.notes || "" }); setSubModal("deal"); }} style={smallBtn}>{com.resultado || com.notes ? "Editar" : "+ Anotar"}</button>
+                </div>
+                {com.motivo && <div style={{ fontSize: 12, color: "#555" }}>Motivo: {com.motivo}</div>}
+                {com.notes && <div style={{ fontSize: 12, color: "#555", whiteSpace: "pre-wrap" }}>{com.notes}</div>}
+                {!com.resultado && !com.notes && <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>Anote o que foi conversado. A IA usa essas anotações quando você atualiza a análise.</div>}
+              </div>
+
+              {/* Gerar análise */}
+              <button onClick={generateSpin} disabled={spinLoading}
+                style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, cursor: spinLoading ? "default" : "pointer", opacity: spinLoading ? .6 : 1, marginBottom: 6 }}>
+                {spinLoading ? "⏳ Analisando o cliente… (até 1 minuto)" : a ? "🔄 Atualizar análise SPIN" : "✨ Gerar análise SPIN"}
+              </button>
+              <div style={{ fontSize: 11, color: "#aaa", textAlign: "center", marginBottom: 12 }}>
+                {a ? `Gerada em ${new Date(a.generatedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}. Atualize depois de registrar a experimental ou anotar uma conversa.` : "Usa a anamnese, a aula experimental, as primeiras aulas e as anotações de negociação."}
+                {isIncomplete(sel) && !hasExp && <div style={{ color: "#b05e1a", marginTop: 4 }}>⚠️ Sem anamnese e sem experimental, a análise vai sair genérica.</div>}
+              </div>
+              {spinError && <div style={{ fontSize: 12, color: "#c0392b", background: "#ffeaea", border: "1px solid #f5c6c6", borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>{spinError}</div>}
+
+              {a && <SpinAnalysis a={a} phone={sel.phone} />}
+            </div>
+            );
+          })()}
 
           {/* TAB AVALIAÇÕES */}
           {detailTab === "avaliacoes" && (() => {
@@ -1399,6 +1572,44 @@ export default function CRM() {
       )}
 
       {/* ── SUB-MODAL: Férias / viagem ── */}
+      {subModal === "experimental" && (
+        <Modal title="🧪 Aula experimental" onClose={() => setSubModal(null)} wide>
+          <Inp label="Data" value={expForm.date} onChange={v => setExpForm(f => ({ ...f, date: v }))} type="date" />
+          <ScoreSlider label="De 0 a 10, o quanto o cliente gostou da experiência?" value={expForm.gostou} onChange={v => setExpForm(f => ({ ...f, gostou: v }))} />
+          <ScoreSlider label="De 0 a 10, qual o interesse em fechar?" value={expForm.interesse} onChange={v => setExpForm(f => ({ ...f, interesse: v }))} hint="Sua percepção ao final da aula" />
+          <TA label="Como o cliente reagiu? O que mais chamou a atenção dele?" value={expForm.reacao} onChange={v => setExpForm(f => ({ ...f, reacao: v }))} rows={2} placeholder="Ex: se surpreendeu com a intensidade, gostou da fase de mobilidade…" />
+          <TA label="O que o cliente disse? (desejos, frustrações, receios — com as palavras dele)" value={expForm.falas} onChange={v => setExpForm(f => ({ ...f, falas: v }))} rows={3} placeholder="Ex: “já fiz de tudo e minha barriga não muda”, “não tenho tempo de ir pra academia”…" />
+          <TA label="Sentiu alguma dor ou desconforto?" value={expForm.dor} onChange={v => setExpForm(f => ({ ...f, dor: v }))} rows={2} />
+          <TA label="Que dúvidas ou objeções levantou?" value={expForm.objecoes} onChange={v => setExpForm(f => ({ ...f, objecoes: v }))} rows={2} placeholder="Ex: perguntou o preço, achou 2x por semana pouco, medo do choque…" />
+          <TA label="Observações do profissional" value={expForm.obs} onChange={v => setExpForm(f => ({ ...f, obs: v }))} rows={2} />
+          <button onClick={async () => {
+            await updateSel(c => ({ ...c, commercial: { ...(c.commercial || {}), experimental: expForm } }));
+            setSubModal(null);
+          }} style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer", marginTop: 4 }}>
+            Salvar experimental
+          </button>
+        </Modal>
+      )}
+
+      {subModal === "deal" && (
+        <Modal title="🤝 Negociação" onClose={() => setSubModal(null)}>
+          <YesNo label="Status" value={dealForm.resultado} onChange={v => setDealForm(f => ({ ...f, resultado: v }))} options={DEAL_STATUS} />
+          {dealForm.resultado === "Não fechou" && (
+            <TA label="Por que não fechou?" value={dealForm.motivo} onChange={v => setDealForm(f => ({ ...f, motivo: v }))} rows={2} />
+          )}
+          <TA label="Anotações das conversas" value={dealForm.notes} onChange={v => setDealForm(f => ({ ...f, notes: v }))} rows={6} placeholder="Ex: 26/10 – liguei, pediu para pensar até sexta; preocupada com a agenda de viagens…" />
+          {dealForm.resultado === "Fechou" && !sel?.emsFreq && (
+            <div style={{ fontSize: 12, color: "#b05e1a", marginBottom: 10 }}>Lembre de preencher o Plano EMS em "Editar cliente".</div>
+          )}
+          <button onClick={async () => {
+            await updateSel(c => ({ ...c, commercial: { ...(c.commercial || {}), ...dealForm, motivo: dealForm.resultado === "Não fechou" ? dealForm.motivo : "" } }));
+            setSubModal(null);
+          }} style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer", marginTop: 4 }}>
+            Salvar
+          </button>
+        </Modal>
+      )}
+
       {subModal === "workout" && (
         <Modal title={workoutForm.id ? "🏋️ Editar treino" : "🏋️ Novo treino"} onClose={() => setSubModal(null)}>
           <Inp label="Nome do treino *" value={workoutForm.name} onChange={v => setWorkoutForm(f => ({ ...f, name: v }))} placeholder="Ex: Treino A – Inferiores" />
