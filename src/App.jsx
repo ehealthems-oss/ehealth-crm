@@ -22,6 +22,9 @@ const STAGE_COLORS = {
 // Férias / viagem: c.pauses = [{ id, type, start, returnDate, notes }]
 const PAUSE_TYPES = ["Férias", "Viagem", "Outro"];
 const EMPTY_PAUSE = { type: "Férias", start: "", returnDate: "", notes: "" };
+// Periodização: c.workouts = [{ id, name, start, exercises, active }]
+const EMPTY_WORKOUT = { name: "", start: "", exercises: "", active: true };
+
 const gold = "#c9a96e", navy = "#0C1B33", cream = "#F5F0E8";
 
 // 4 tipos fixos de avaliação
@@ -43,7 +46,7 @@ const EMPTY_CLIENT = {
   reportUrl: "", // PDF do relatório
   attentionPoints: "", // pontos de atenção extraídos/editados
   height: "", weight: "", goals: "", // vindos da anamnese
-  assessments: [], lessons: [], touchpoints: [], tasks: [], pauses: [],
+  assessments: [], lessons: [], touchpoints: [], tasks: [], pauses: [], workouts: [],
 };
 
 const EMPTY_LESSON = {
@@ -56,11 +59,14 @@ const EMPTY_LESSON = {
   riscoRetencao: "",     // texto livre
   dormiu: "",            // Sim / Não / Parcialmente
   descansado: "",        // Sim / Não / Parcialmente
+  dorChegada: null,      // 0-10, dor/desconforto ao chegar
+  dorChegadaDescricao: "",
   dor: null,             // 0-10 (null = sem dor)
   dorDescricao: "",      // o que sentiu e o que foi feito
   alimentacao: "",       // texto livre
   musculosTrabalhados: "", // legado: aulas antigas
-  treino: "",            // treino da periodização
+  treinoNome: "",        // treino da aba Periodização
+  treino: "",            // legado: texto livre do treino
   adaptacoes: "",
   observacaoGeral: "",
 };
@@ -413,6 +419,7 @@ export default function CRM() {
   const [form, setForm] = useState({ ...EMPTY_CLIENT });
   const [lessonForm, setLessonForm] = useState({ ...EMPTY_LESSON, date: today() });
   const [pauseForm, setPauseForm] = useState({ ...EMPTY_PAUSE });
+  const [workoutForm, setWorkoutForm] = useState({ ...EMPTY_WORKOUT });
   const [aiLoading, setAiLoading] = useState(false);
   const [editingLesson, setEditingLesson] = useState(null); // id da aula sendo visualizada
   const fileInputRef = useRef(null);
@@ -441,6 +448,7 @@ export default function CRM() {
     touchpoints: c.touchpoints || [],
     tasks: c.tasks || [],
     pauses: c.pauses || [],
+    workouts: c.workouts || [],
   });
 
   // ── CRUD ──
@@ -841,6 +849,7 @@ export default function CRM() {
             { id: "geral", label: "Geral" },
             { id: "anamnese", label: "Anamnese / Relatório" },
             { id: "avaliacoes", label: "Avaliações" },
+            { id: "periodizacao", label: `Periodização (${(sel.workouts || []).filter(w => w.active).length})` },
             { id: "aulas", label: `Aulas (${(sel.lessons || []).length})` },
           ]} />
 
@@ -1091,6 +1100,37 @@ export default function CRM() {
             );
           })()}
 
+          {/* TAB PERIODIZAÇÃO */}
+          {detailTab === "periodizacao" && (
+            <div>
+              <SectionTitle action={
+                <button onClick={() => { setWorkoutForm({ ...EMPTY_WORKOUT, start: today() }); setSubModal("workout"); }}
+                  style={{ background: gold, color: navy, border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  + Novo treino
+                </button>
+              }>Treinos da periodização</SectionTitle>
+              {(sel.workouts || []).length === 0 ? (
+                <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "20px 0" }}>Nenhum treino cadastrado. Cadastre aqui os treinos (A, B, C…) para escolher na hora de registrar a aula.</div>
+              ) : [...(sel.workouts || [])].sort((a, b) => (b.active - a.active) || (b.start > a.start ? 1 : -1)).map(w => {
+                const done = (sel.lessons || []).filter(l => l.status === "Realizada" && l.treinoNome === w.name).sort((a, b) => b.date > a.date ? 1 : -1);
+                return (
+                  <div key={w.id} style={{ background: w.active ? "#fff" : "#f0f0f0", borderRadius: 10, padding: "10px 14px", marginBottom: 8, border: "1px solid #e8dfc8" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ flex: 1, fontWeight: 700, color: w.active ? navy : "#999", fontSize: 14 }}>🏋️ {w.name}</span>
+                      {!w.active && <span style={{ fontSize: 11, color: "#888", border: "1px solid #ccc", borderRadius: 10, padding: "1px 8px" }}>Encerrado</span>}
+                      <button onClick={() => { setWorkoutForm({ ...w }); setSubModal("workout"); }}
+                        style={{ background: "none", border: "1px solid #c9b89a", borderRadius: 6, padding: "2px 10px", fontSize: 11, cursor: "pointer", color: "#888" }}>Editar</button>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#888", margin: "2px 0 6px" }}>
+                      {w.start ? `Desde ${fmtDate(w.start)}` : ""}{w.start ? " · " : ""}{done.length} aula{done.length === 1 ? "" : "s"}{done[0] ? ` · última em ${fmtDateShort(done[0].date)}` : ""}
+                    </div>
+                    {w.exercises && <div style={{ fontSize: 12, color: "#555", whiteSpace: "pre-wrap" }}>{w.exercises}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* TAB AULAS */}
           {detailTab === "aulas" && (
             <div>
@@ -1155,9 +1195,12 @@ export default function CRM() {
                         <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 12, color: "#555" }}>
                           {l.dormiu && <div>😴 Dormiu bem: <b>{l.dormiu}</b></div>}
                           {l.descansado && <div>⚡ Descansado: <b>{l.descansado}</b></div>}
-                          {l.dor !== null && l.dor !== undefined && <div>🤕 Dor/desconforto: <b>{l.dor}/10</b></div>}
+                          {l.dorChegada !== null && l.dorChegada !== undefined && <div>🤕 Dor ao chegar: <b>{l.dorChegada}/10</b></div>}
+                          {l.dorChegadaDescricao && <div style={{ gridColumn: "1/-1" }}>🤕 O que sentia ao chegar: {l.dorChegadaDescricao}</div>}
+                          {l.dor !== null && l.dor !== undefined && <div>🤕 Dor na sessão: <b>{l.dor}/10</b></div>}
                           {l.dorDescricao && <div style={{ gridColumn: "1/-1" }}>🤕 O que sentiu: {l.dorDescricao}</div>}
                           {l.alimentacao && <div style={{ gridColumn: "1/-1" }}>🍎 Alimentação: {l.alimentacao}</div>}
+                          {l.treinoNome && <div style={{ gridColumn: "1/-1" }}>🏋️ Treino: <b>{l.treinoNome}</b></div>}
                           {l.treino && <div style={{ gridColumn: "1/-1", whiteSpace: "pre-wrap" }}>🏋️ Treino: {l.treino}</div>}
                           {l.musculosTrabalhados && <div style={{ gridColumn: "1/-1" }}>💪 Músculos: {l.musculosTrabalhados}</div>}
                           {l.adaptacoes && <div style={{ gridColumn: "1/-1" }}>🔧 Mudanças no treino: {l.adaptacoes}</div>}
@@ -1225,6 +1268,10 @@ export default function CRM() {
               </div>
 
               <div style={{ borderTop: "1px solid #e0d8cc", paddingTop: 14, marginTop: 4 }}>
+                <ScoreSlider label="O cliente chegou com alguma dor/desconforto? (0 = nenhuma)" value={lessonForm.dorChegada} onChange={lf("dorChegada")} hint="0 = sem dor, 10 = dor intensa" />
+                {lessonForm.dorChegada > 0 && (
+                  <TA label="O que o cliente sentia ao chegar? Onde era a dor?" value={lessonForm.dorChegadaDescricao} onChange={lf("dorChegadaDescricao")} rows={2} placeholder="Ex: chegou com dor lombar depois de passar o dia sentada…" />
+                )}
                 <ScoreSlider label="Teve alguma dor/desconforto durante a sessão? (0 = nenhuma)" value={lessonForm.dor} onChange={lf("dor")} hint="0 = sem dor, 10 = dor intensa" />
                 {lessonForm.dor > 0 && (
                   <TA label="O que o cliente sentiu? Onde foi a dor e o que foi feito?" value={lessonForm.dorDescricao} onChange={lf("dorDescricao")} rows={2} placeholder="Ex: dor no joelho direito no agachamento, trocamos por leg press…" />
@@ -1233,7 +1280,12 @@ export default function CRM() {
               </div>
 
               <div style={{ borderTop: "1px solid #e0d8cc", paddingTop: 14, marginTop: 4 }}>
-                <TA label="Qual foi o treino da aula (periodização)?" value={lessonForm.treino} onChange={lf("treino")} rows={4} placeholder="Ex: Treino A – inferiores: agachamento 3x12, stiff 3x10, prancha 3x40s…" />
+                {(sel?.workouts || []).some(w => w.active) ? (
+                  <Sel label="Qual treino da periodização foi feito?" value={lessonForm.treinoNome || "—"} onChange={v => lf("treinoNome")(v === "—" ? "" : v)}
+                    options={["—", ...(sel.workouts || []).filter(w => w.active).map(w => w.name)]} />
+                ) : (
+                  <div style={{ fontSize: 12, color: "#888", marginBottom: 13 }}>🏋️ Cadastre os treinos na aba Periodização para escolher aqui qual foi feito.</div>
+                )}
                 <TA label="Teve alguma mudança no treino? Qual?" value={lessonForm.adaptacoes} onChange={lf("adaptacoes")} rows={2} placeholder="Ex: reduziu carga no quadril por dor, trabalhou mobilidade…" />
               </div>
 
@@ -1244,7 +1296,7 @@ export default function CRM() {
           )}
 
           {/* Observação geral (sempre visível) */}
-          <TA label="📝 Alguma observação geral?" value={lessonForm.observacaoGeral} onChange={lf("observacaoGeral")} rows={3} placeholder="Observações gerais sobre a aula, o cliente, próximos passos…" />
+          <TA label="📝 Alguma observação geral?" value={lessonForm.observacaoGeral} onChange={lf("observacaoGeral")} rows={3} placeholder="Ex: comentou que está estressada no trabalho, está com problema na família…" />
 
           {(() => {
             const needsReason = lessonForm.status === "Cancelada" && !(lessonForm.motivo || "").trim();
@@ -1261,6 +1313,36 @@ export default function CRM() {
       )}
 
       {/* ── SUB-MODAL: Férias / viagem ── */}
+      {subModal === "workout" && (
+        <Modal title={workoutForm.id ? "🏋️ Editar treino" : "🏋️ Novo treino"} onClose={() => setSubModal(null)}>
+          <Inp label="Nome do treino *" value={workoutForm.name} onChange={v => setWorkoutForm(f => ({ ...f, name: v }))} placeholder="Ex: Treino A – Inferiores" />
+          <Inp label="Início" value={workoutForm.start} onChange={v => setWorkoutForm(f => ({ ...f, start: v }))} type="date" />
+          <TA label="Exercícios" value={workoutForm.exercises} onChange={v => setWorkoutForm(f => ({ ...f, exercises: v }))} rows={6} placeholder="Ex: agachamento 3x12, stiff 3x10, prancha 3x40s…" />
+          {workoutForm.id && (
+            <YesNo label="Situação" value={workoutForm.active ? "Em uso" : "Encerrado"} onChange={v => v && setWorkoutForm(f => ({ ...f, active: v === "Em uso" }))} options={["Em uso", "Encerrado"]} />
+          )}
+          {(() => {
+            const dup = (sel?.workouts || []).some(w => w.id !== workoutForm.id && w.name.trim().toLowerCase() === workoutForm.name.trim().toLowerCase());
+            const invalid = !workoutForm.name.trim() || dup;
+            return (
+              <button disabled={invalid} onClick={async () => {
+                const w = { ...workoutForm, name: workoutForm.name.trim() };
+                const old = (sel.workouts || []).find(x => x.id === w.id);
+                await updateSel(c => ({
+                  ...c,
+                  workouts: w.id ? (c.workouts || []).map(x => x.id === w.id ? w : x) : [{ ...w, id: Date.now().toString() }, ...(c.workouts || [])],
+                  // renomear o treino mantém o vínculo com as aulas já registradas
+                  lessons: old && old.name !== w.name ? (c.lessons || []).map(l => l.treinoNome === old.name ? { ...l, treinoNome: w.name } : l) : c.lessons,
+                }));
+                setSubModal(null);
+              }} style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: invalid ? "default" : "pointer", marginTop: 4, opacity: invalid ? .5 : 1 }}>
+                {dup ? "Já existe um treino com esse nome" : "Salvar treino"}
+              </button>
+            );
+          })()}
+        </Modal>
+      )}
+
       {subModal === "pause" && (
         <Modal title="✈️ Registrar férias / viagem" onClose={() => setSubModal(null)}>
           <YesNo label="Tipo" value={pauseForm.type} onChange={v => setPauseForm(f => ({ ...f, type: v || f.type }))} options={PAUSE_TYPES} />
