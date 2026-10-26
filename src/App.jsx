@@ -216,6 +216,90 @@ const stageFromPauses = c => {
   return activePause(c) ? "Pausado" : "Cliente ativo";
 };
 
+// Pontos de atenção das aulas: últimas aulas realizadas comparadas com as primeiras
+const LESSON_WINDOW = 3; // quantas aulas formam o "início" e o "agora"
+const LESSON_SCORES = [["presenca", "Presença/atenção"], ["motivacao", "Motivação"], ["troca", "Troca"]];
+const hasNum = v => v !== null && v !== undefined && v !== "";
+const avgOf = (ls, k) => { const v = ls.map(l => l[k]).filter(hasNum).map(Number); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+const fmtAvg = n => n.toFixed(1).replace(".0", "").replace(".", ",");
+const daysSince = d => Math.floor((new Date(today() + "T12:00:00") - new Date(d + "T12:00:00")) / 86400000);
+
+const lessonAttentionPoints = c => {
+  const all = lessonsNewestFirst(c);
+  const done = all.filter(l => l.status === "Realizada");
+  if (!all.length) return [];
+  const pts = []; // { level: "alto" | "medio" | "bom", text }
+  const last = done[0];
+  const recent = done.slice(0, LESSON_WINDOW);
+  const first = done.slice(-LESSON_WINDOW).reverse();
+  const canCompare = done.length >= LESSON_WINDOW * 2;
+
+  // Última aula
+  if (last) {
+    const when = `na última aula (${fmtDateShort(last.date)})`;
+    if (last.riscoRetencao?.trim()) pts.push({ level: "alto", text: `Risco de retenção apontado ${when}: ${last.riscoRetencao.trim()}` });
+    if (last.dorChegada >= 4) pts.push({ level: "alto", text: `Chegou com dor ${last.dorChegada}/10 ${when}${last.dorChegadaDescricao ? `: ${last.dorChegadaDescricao}` : ""}` });
+    if (last.dor >= 4) pts.push({ level: "alto", text: `Dor ${last.dor}/10 durante a sessão ${when}${last.dorDescricao ? `: ${last.dorDescricao}` : ""}` });
+    const sleep = [last.dormiu === "Não" && "não dormiu bem", last.descansado === "Não" && "não estava recuperado"].filter(Boolean);
+    if (sleep.length) pts.push({ level: "medio", text: `${sleep.join(" e ")} ${when}`.replace(/^./, m => m.toUpperCase()) });
+    if (last.adaptacoes?.trim()) pts.push({ level: "medio", text: `Treino adaptado ${when}: ${last.adaptacoes.trim()}` });
+    LESSON_SCORES.forEach(([k, label]) => { if (hasNum(last[k]) && last[k] < 5) pts.push({ level: "medio", text: `${label} baixa ${when}: ${last[k]}/10` }); });
+  }
+
+  // Dor recorrente nas últimas aulas
+  const painful = recent.filter(l => l.dor > 0 || l.dorChegada > 0);
+  if (recent.length >= 2 && painful.length >= 2) pts.push({ level: "alto", text: `Relatou dor/desconforto em ${painful.length} das últimas ${recent.length} aulas` });
+
+  // Comparação com o início
+  if (canCompare) {
+    LESSON_SCORES.forEach(([k, label]) => {
+      const a = avgOf(first, k), b = avgOf(recent, k);
+      if (a === null || b === null) return;
+      if (b <= a - 2) pts.push({ level: "alto", text: `${label} caiu: média ${fmtAvg(a)} nas primeiras aulas → ${fmtAvg(b)} nas últimas` });
+      else if (b >= a + 2) pts.push({ level: "bom", text: `${label} subiu: média ${fmtAvg(a)} nas primeiras aulas → ${fmtAvg(b)} nas últimas` });
+    });
+    const pa = avgOf(first, "dor"), pb = avgOf(recent, "dor");
+    if (pa !== null && pb !== null && pb >= pa + 2) pts.push({ level: "alto", text: `Dor na sessão aumentou: média ${fmtAvg(pa)} no início → ${fmtAvg(pb)} nas últimas` });
+    if (pa !== null && pb !== null && pb <= pa - 2) pts.push({ level: "bom", text: `Dor na sessão diminuiu: média ${fmtAvg(pa)} no início → ${fmtAvg(pb)} nas últimas` });
+  }
+
+  // Faltas: últimas aulas agendadas comparadas com as primeiras
+  const missedRecent = all.slice(0, 5).filter(isMissed).length, missedFirst = all.slice(-5).filter(isMissed).length;
+  if (all.length >= 10 && missedRecent >= missedFirst + 2)
+    pts.push({ level: "alto", text: `Mais faltas que no início: ${missedRecent} das últimas 5 aulas canceladas/reagendadas (no início eram ${missedFirst} de 5)` });
+
+  // Tempo sem treinar
+  if (c.stage === "Cliente ativo" && last && daysSince(last.date) > 14)
+    pts.push({ level: "medio", text: `Sem aula realizada há ${daysSince(last.date)} dias` });
+
+  if (!canCompare && done.length) pts.push({ level: "info", text: `Comparação com o início disponível a partir de ${LESSON_WINDOW * 2} aulas realizadas (hoje: ${done.length})` });
+  const order = { alto: 0, medio: 1, bom: 2, info: 3 };
+  return pts.sort((a, b) => order[a.level] - order[b.level]);
+};
+
+const LESSON_POINT_STYLE = {
+  alto:  { icon: "🔴", color: "#c0392b" },
+  medio: { icon: "🟠", color: "#b05e1a" },
+  bom:   { icon: "🟢", color: "#2d7a4f" },
+  info:  { icon: "ℹ️", color: "#888" },
+};
+
+function LessonAttention({ client }) {
+  const pts = lessonAttentionPoints(client);
+  if (!pts.length) return null;
+  return (
+    <div style={{ background: "#fff8e8", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #f0d080" }}>
+      <div style={{ fontWeight: 700, fontSize: 13, color: "#7a5c00", marginBottom: 6 }}>⚠️ Pontos de atenção das aulas</div>
+      {pts.map((p, i) => (
+        <div key={i} style={{ display: "flex", gap: 6, fontSize: 13, color: LESSON_POINT_STYLE[p.level].color, lineHeight: 1.5, marginBottom: 3 }}>
+          <span style={{ flexShrink: 0 }}>{LESSON_POINT_STYLE[p.level].icon}</span><span>{p.text}</span>
+        </div>
+      ))}
+      <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>Atualizado automaticamente a cada aula registrada: a última aula e as {LESSON_WINDOW} últimas comparadas com as {LESSON_WINDOW} primeiras.</div>
+    </div>
+  );
+}
+
 const lessonStats = c => {
   const ls = (c.lessons || []).filter(l => isThisMonth(l.date));
   return {
@@ -882,10 +966,11 @@ export default function CRM() {
               {/* Pontos de atenção */}
               {sel.attentionPoints && (
                 <div style={{ background: "#fff8e8", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #f0d080" }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: "#7a5c00", marginBottom: 6 }}>⚠️ Pontos de atenção</div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#7a5c00", marginBottom: 6 }}>⚠️ Pontos de atenção da anamnese</div>
                   <div style={{ fontSize: 13, color: "#555", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{sel.attentionPoints}</div>
                 </div>
               )}
+              <LessonAttention client={sel} />
 
               {sel.notes && (
                 <div style={{ background: "#f8f3ea", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#555", marginBottom: 12 }}>
@@ -1134,6 +1219,7 @@ export default function CRM() {
           {/* TAB AULAS */}
           {detailTab === "aulas" && (
             <div>
+              <LessonAttention client={sel} />
               {/* Contador do mês */}
               {(() => { const s = lessonStats(sel); return (
                 <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
