@@ -412,8 +412,6 @@ export default function CRM() {
   const [detailTab, setDetailTab] = useState("geral");
   const [form, setForm] = useState({ ...EMPTY_CLIENT });
   const [lessonForm, setLessonForm] = useState({ ...EMPTY_LESSON, date: today() });
-  const [touchForm, setTouchForm] = useState({ date: today(), channel: "WhatsApp", direction: "Saída", summary: "" });
-  const [taskForm, setTaskForm] = useState({ title: "", dueDate: "", done: false });
   const [pauseForm, setPauseForm] = useState({ ...EMPTY_PAUSE });
   const [aiLoading, setAiLoading] = useState(false);
   const [editingLesson, setEditingLesson] = useState(null); // id da aula sendo visualizada
@@ -844,8 +842,6 @@ export default function CRM() {
             { id: "anamnese", label: "Anamnese / Relatório" },
             { id: "avaliacoes", label: "Avaliações" },
             { id: "aulas", label: `Aulas (${(sel.lessons || []).length})` },
-            { id: "touchpoints", label: `Contatos (${(sel.touchpoints || []).length})` },
-            { id: "tarefas", label: `Tarefas (${(sel.tasks || []).filter(t => !t.done).length})` },
           ]} />
 
           {/* TAB GERAL */}
@@ -1176,76 +1172,6 @@ export default function CRM() {
             </div>
           )}
 
-          {/* TAB TOUCHPOINTS */}
-          {detailTab === "touchpoints" && (
-            <div>
-              <SectionTitle action={
-                <button onClick={() => { setTouchForm({ date: today(), channel: "WhatsApp", direction: "Saída", summary: "" }); setSubModal("touch"); }}
-                  style={{ background: gold, color: navy, border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                  + Registrar contato
-                </button>
-              }>Touch points</SectionTitle>
-              {(sel.touchpoints || []).length === 0 ? (
-                <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "20px 0" }}>Nenhum contato registrado.</div>
-              ) : [...(sel.touchpoints || [])].sort((a, b) => b.date > a.date ? 1 : -1).map(tp => (
-                <div key={tp.id} style={{ display: "flex", gap: 10, padding: "9px 12px", background: "#fff", borderRadius: 8, border: "1px solid #e8dfc8", marginBottom: 6 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: tp.direction === "Saída" ? navy + "15" : gold + "25", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
-                    {tp.channel === "WhatsApp" ? "💬" : tp.channel === "Ligação" ? "📞" : "🤝"}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-                      <span style={{ fontWeight: 600, fontSize: 12, color: navy }}>{tp.channel} · {tp.direction}</span>
-                      <span style={{ fontSize: 11, color: "#aaa" }}>{fmtDateShort(tp.date)}</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: "#555" }}>{tp.summary}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* TAB TAREFAS */}
-          {detailTab === "tarefas" && (
-            <div>
-              <SectionTitle action={
-                <button onClick={() => { setTaskForm({ title: "", dueDate: "", done: false }); setSubModal("task"); }}
-                  style={{ background: gold, color: navy, border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                  + Nova tarefa
-                </button>
-              }>Tarefas</SectionTitle>
-              {(sel.tasks || []).filter(t => !t.done).length === 0 && (sel.tasks || []).filter(t => t.done).length === 0 && (
-                <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "20px 0" }}>Nenhuma tarefa.</div>
-              )}
-              {(sel.tasks || []).filter(t => !t.done).map(t => {
-                const ov = t.dueDate && new Date(t.dueDate + "T12:00:00") < new Date();
-                return (
-                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: ov ? "#fff3ee" : "#fff", borderRadius: 8, border: "1px solid " + (ov ? "#f0a070" : "#e8dfc8"), marginBottom: 6 }}>
-                    <button onClick={() => updateSel(c => ({ ...c, tasks: (c.tasks || []).map(x => x.id === t.id ? { ...x, done: true } : x) }))}
-                      style={{ width: 20, height: 20, borderRadius: 4, border: "2px solid #c9b89a", background: "transparent", cursor: "pointer", flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: navy }}>{t.title}</div>
-                      {t.dueDate && <div style={{ fontSize: 11, color: ov ? "#b05e1a" : "#888" }}>📅 {fmtDate(t.dueDate)}{ov ? " · Atrasada" : ""}</div>}
-                    </div>
-                    <button onClick={() => updateSel(c => ({ ...c, tasks: (c.tasks || []).filter(x => x.id !== t.id) }))}
-                      style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 18, lineHeight: 1 }}>×</button>
-                  </div>
-                );
-              })}
-              {(sel.tasks || []).filter(t => t.done).length > 0 && (
-                <>
-                  <div style={{ fontSize: 11, color: "#aaa", margin: "10px 0 5px", fontWeight: 600 }}>CONCLUÍDAS</div>
-                  {(sel.tasks || []).filter(t => t.done).map(t => (
-                    <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "#f0f0f0", borderRadius: 8, marginBottom: 4 }}>
-                      <div style={{ width: 20, height: 20, borderRadius: 4, background: "#2d7a4f", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, flexShrink: 0 }}>✓</div>
-                      <span style={{ flex: 1, fontSize: 12, color: "#aaa", textDecoration: "line-through" }}>{t.title}</span>
-                      <button onClick={() => updateSel(c => ({ ...c, tasks: (c.tasks || []).filter(x => x.id !== t.id) }))}
-                        style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 16 }}>×</button>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-          )}
         </Modal>
       )}
 
@@ -1331,40 +1257,6 @@ export default function CRM() {
               </button>
             );
           })()}
-        </Modal>
-      )}
-
-      {/* ── SUB-MODAL: Contato ── */}
-      {subModal === "touch" && (
-        <Modal title="💬 Registrar contato" onClose={() => setSubModal(null)}>
-          <Inp label="Data" value={touchForm.date} onChange={v => setTouchForm(f => ({ ...f, date: v }))} type="date" />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Sel label="Canal" value={touchForm.channel} onChange={v => setTouchForm(f => ({ ...f, channel: v }))} options={["WhatsApp", "Presencial", "Ligação", "E-mail"]} />
-            <Sel label="Direção" value={touchForm.direction} onChange={v => setTouchForm(f => ({ ...f, direction: v }))} options={["Saída", "Entrada"]} />
-          </div>
-          <TA label="Resumo do contato *" value={touchForm.summary} onChange={v => setTouchForm(f => ({ ...f, summary: v }))} rows={3} placeholder="Do que se tratou o contato…" />
-          <button onClick={async () => {
-            if (!touchForm.summary) return;
-            await updateSel(c => ({ ...c, touchpoints: [{ ...touchForm, id: Date.now().toString() }, ...(c.touchpoints || [])] }));
-            setSubModal(null);
-          }} disabled={!touchForm.summary} style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer", marginTop: 4, opacity: touchForm.summary ? 1 : .5 }}>
-            Salvar contato
-          </button>
-        </Modal>
-      )}
-
-      {/* ── SUB-MODAL: Tarefa ── */}
-      {subModal === "task" && (
-        <Modal title="✅ Nova tarefa" onClose={() => setSubModal(null)}>
-          <Inp label="Descrição *" value={taskForm.title} onChange={v => setTaskForm(f => ({ ...f, title: v }))} placeholder="Ex: Enviar protocolo de treino" />
-          <Inp label="Data limite" value={taskForm.dueDate} onChange={v => setTaskForm(f => ({ ...f, dueDate: v }))} type="date" />
-          <button onClick={async () => {
-            if (!taskForm.title) return;
-            await updateSel(c => ({ ...c, tasks: [{ ...taskForm, id: Date.now().toString(), done: false }, ...(c.tasks || [])] }));
-            setSubModal(null);
-          }} disabled={!taskForm.title} style={{ width: "100%", background: navy, color: gold, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer", marginTop: 4, opacity: taskForm.title ? 1 : .5 }}>
-            Salvar tarefa
-          </button>
         </Modal>
       )}
 
