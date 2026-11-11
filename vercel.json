@@ -1,5 +1,6 @@
 {
   "functions": {
-    "api/comercial.js": { "maxDuration": 120 }
+    "api/comercial.js": { "maxDuration": 120 },
+    "api/whatsapp.js": { "maxDuration": 120 }
   }
 }
